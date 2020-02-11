@@ -8,20 +8,20 @@ import time
 import re
 import subprocess
 
-__all__ = [	'get_BMRB_entries',
-			'get_NMRSTAR_files',
-			'build_entry_database',
-			'remove_entries',
-			'cluster_sequences',
-			'build_CS_database'
-			]
+__all__ = ['get_BMRB_entries',
+	'get_NMRSTAR_files',
+	'build_entry_database',
+	'remove_entries',
+	'cluster_sequences',
+	'build_CS_database'
+	]
 
 __MY_APPLICATION__ = "PROSECCO-NMR"
 
 def get_BMRB_entries():
 	base_link = "http://webapi.bmrb.wisc.edu/v2/"
 	macro_entries = requests.get(base_link+"/list_entries?database=macromolecules",
-                      headers={"Application":__MY_APPLICATION__})
+		headers={"Application":__MY_APPLICATION__})
 	entries = macro_entries.json()
 	return entries
 
@@ -31,27 +31,24 @@ def get_NMRSTAR_files(entries,directory="./NMRSTAR",prefix="",suffix=".str"):
 	N = len(entries)
 	for i, eID in enumerate(entries):
 		fn = Path(d / (prefix+eID+suffix))
-
 		# Ignore already downloaded files
 		if fn.is_file():
 			continue
-
 		perc = int(i*100/N)
 		print("\r  >> Downloading NMRSTAR file for BMRB Entry {} Progress: {}/{} ({}%)     ".format(eID,i,N,perc), end='')
-
 		entry = pynmrstar.Entry.from_database(eID)
 		entry.write_to_file(str(fn))
-
 	return
 
-def build_entry_database(	entries,
-							local_files=True,
-							NMRSTAR_directory="./NMRSTAR",
-							NMRSTAR_prefix="",
-							NMRSTAR_suffix=".str",
-							PDBmatch_file=None,
-							experimental_conditions=["ph","temperature","pressure"],
-							record_denaturant=True):
+def build_entry_database(entries,
+	local_files=True,
+	NMRSTAR_directory="./NMRSTAR",
+	NMRSTAR_prefix="",
+	NMRSTAR_suffix=".str",
+	PDBmatch_file=None,
+	experimental_conditions=["ph","temperature","pressure"],
+	record_denaturant=True):
+
 	'''
 	Build a pandas dataframe containing the information on the BMRB entries listed in "entries"
 	
@@ -60,25 +57,20 @@ def build_entry_database(	entries,
 
 	if PDBmatch_file is None:
 		PDB_match = requests.get("http://webapi.bmrb.wisc.edu/v2/mappings/bmrb/pdb?format=text&match_type=exact",
-								headers={"Application":__MY_APPLICATION__}).text
+			headers={"Application":__MY_APPLICATION__}).text
 	else:
 		PDB_match = open(PDBmatch_file).read()
-
 	PDBmatch_d = { l.split()[0] : [ x for x in l.split()[1].split(',') ] for l in PDB_match.split('\n')}
-
 	if local_files:
 		d = Path(NMRSTAR_directory)
 		if not d.is_dir():
 			raise ValueError('Cannot build BMRB database: missing NMRSTAR directory {}'.format(NMRSTAR_directory))
 
 	EntryDB = []
-
 	N = len(entries)
 	for i, eID in enumerate(entries):
-
 		perc = int(i*100/N)
 		print("\r  >> Building database: Entry {} ; Progress: {}/{} ({}%)     ".format(eID,i,N,perc), end='')
-
 		if local_files:
 			fn = Path(d / (NMRSTAR_prefix+eID+NMRSTAR_suffix))
 			if not fn.is_file():
@@ -87,7 +79,6 @@ def build_entry_database(	entries,
 			nmrstar = pynmrstar.Entry.from_file(str(fn))
 		else:
 			nmrstar = pynmrstar.Entry.from_database(eID)
-
 		CS = nmrstar.get_loops_by_category("Atom_chem_shift")
 
 		# Ignore entries with no chemical shift information:
@@ -95,7 +86,6 @@ def build_entry_database(	entries,
 			continue
 
 		entities = set(CS[0].get_tag("Entity_ID"))
-
 		# Ignore entries with more than one "entity"
 		# This could be rectified by more careful parsing
 		if len(entities) > 1:
@@ -107,12 +97,9 @@ def build_entry_database(	entries,
 			continue
 
 		nCS = len(CS[0])
-
 		# Parse experimental conditions:
 		# Sample type and other conditions listed in experimental_conditions
-
 		conditions_d = _extract_experimental_conditions(nmrstar,experimental_conditions=experimental_conditions)
-
 		seqs = _extract_sequences(nmrstar,entities)
 
 		# Since we have only one entity - we have a single sequence:
@@ -123,32 +110,30 @@ def build_entry_database(	entries,
 		if eID in PDBmatch_d:
 			pdb = PDBmatch_d[eID][0]
 
-		Entry_d = {	"BMRB_ID" : eID,
-					"N_CS" : nCS,
-					"Sequence" : seq,
-					"PDB_ID" : pdb,
-					"polymer_type" : polymer_type
-					}
+		Entry_d = {"BMRB_ID" : eID,
+			"N_CS" : nCS,
+			"Sequence" : seq,
+			"PDB_ID" : pdb,
+			"polymer_type" : polymer_type
+			}
 
 		for cond in conditions_d:
 			Entry_d[cond] = conditions_d[cond]
-
 		if record_denaturant:
 			Entry_d["Denatured"] = _is_denatured(nmrstar)
-
 		EntryDB.append(Entry_d)
 
 	EntryDB = pd.DataFrame(EntryDB)
 	return EntryDB
 
 
-def remove_entries(	EntryDB,
-					Trange=(273.,333.),
-					pHrange=(3.,11.),
-					Prange=(0.,1.5),
-					remove_denatured=True,
-					keep_NaNs=True,
-					reset_index=True):
+def remove_entries(EntryDB,
+	Trange=(273.,333.),
+	pHrange=(3.,11.),
+	Prange=(0.,1.5),
+	remove_denatured=True,
+	keep_NaNs=True,
+	reset_index=True):
 	# Entries should be kept by default if missing data
 	# Especially important for pressure, which is often missing
 
@@ -166,14 +151,14 @@ def remove_entries(	EntryDB,
 		EntryDB = EntryDB.reset_index(drop=True)
 	return EntryDB
 
+def cluster_sequences(EntryDB,
+	similarity=0.9,
+	usearch_exe="usearch",
+	seq_fn="entries.fasta",
+	centroids_fn="centroids.fasta",
+	clusters_fn="clusters.uc",
+	reset_index=True):
 
-def cluster_sequences(	EntryDB,
-						similarity=0.9,
-						usearch_exe="usearch",
-						seq_fn="entries.fasta",
-						centroids_fn="centroids.fasta",
-						clusters_fn="clusters.uc",
-						reset_index=True):
 	'''
 	Cluster the sequences using the UCLUST algorithm
 	and return a database with only the cluster centroids
@@ -205,12 +190,12 @@ def cluster_sequences(	EntryDB,
 
 	seqf.close()
 
-	subprocess.run([	usearch_exe,
-						"-cluster_fast", seq_fn,
-						"-id", str(similarity),
-						"-centroids",centroids_fn,
-						"-uc",clusters_fn
-						])
+	subprocess.run([usearch_exe,
+		"-cluster_fast", seq_fn,
+		"-id", str(similarity),
+		"-centroids",centroids_fn,
+		"-uc",clusters_fn
+		])
 
 	centroids = [ l[1:].strip() for l in open(centroids_fn) if l[0] == ">" ]
 	EntryDB = EntryDB[np.isin(EntryDB["BMRB_ID"],centroids)]
@@ -221,11 +206,11 @@ def cluster_sequences(	EntryDB,
 	return EntryDB
 
 
-def build_CS_database(	EntryDB,
-						local_files=True,
-						NMRSTAR_directory="./NMRSTAR",
-						NMRSTAR_prefix="",
-						NMRSTAR_suffix=".str"):
+def build_CS_database(EntryDB,
+	local_files=True,
+	NMRSTAR_directory="./NMRSTAR",
+	NMRSTAR_prefix="",
+	NMRSTAR_suffix=".str"):
 
 	print("AQUI ESTOY")
 
@@ -260,9 +245,9 @@ def _extract_experimental_conditions(nmrstar,experimental_conditions=["ph","temp
 	return conditions_d
 
 def _extract_sequences(nmrstar,entities):
-	seqd = nmrstar.get_tags([	"_Entity.ID",
-									"_Entity.Name",
-									"_Entity.Polymer_seq_one_letter_code"])
+	seqd = nmrstar.get_tags(["_Entity.ID",
+		"_Entity.Name",
+		"_Entity.Polymer_seq_one_letter_code"])
 	seqs = {}
 	for entity in entities:
 		entityIDX = seqd["_Entity.ID"].index(entity)
