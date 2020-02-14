@@ -7,6 +7,8 @@ import pandas as pd
 import time
 import re
 import subprocess
+from Bio.SeqUtils import IUPACData
+import pkg_resources
 
 __all__ = ['get_BMRB_entries',
 	'get_NMRSTAR_files',
@@ -17,6 +19,102 @@ __all__ = ['get_BMRB_entries',
 	]
 
 __MY_APPLICATION__ = "PROSECCO-NMR"
+
+
+def _extract_experimental_conditions(nmrstar,experimental_conditions=["ph","temperature"]):
+
+	conditions = nmrstar.get_tag("_Sample_condition_variable.Type")
+	conditions_val = nmrstar.get_tag("_Sample_condition_variable.Val")
+	# Make it lowercase to allow different capitalisations
+	conditions = [s.lower() for s in conditions]
+	conditions_d = {c : np.nan for c in experimental_conditions}
+
+	sample_type = nmrstar.get_tag("_Sample.Type")[0].lower()
+	# Micelles is found spelled in singular or plural - keep only singular
+	if sample_type == 'micelles':
+		sample_type = sample_type[:-1]
+
+	conditions_d["sample_type"] = sample_type
+	
+	for cond in experimental_conditions:
+		if cond not in conditions:
+			continue
+		val = conditions_val[conditions.index(cond)]
+		try:
+			val = float(val)
+			conditions_d[cond] = val
+		except ValueError:
+			continue
+
+	return conditions_d
+
+def _extract_sequences(nmrstar,entities):
+	seqd = nmrstar.get_tags(["_Entity.ID",
+		"_Entity.Name",
+		"_Entity.Polymer_seq_one_letter_code"])
+	seqs = {}
+	for entity in entities:
+		entityIDX = seqd["_Entity.ID"].index(entity)
+		seq = seqd["_Entity.Polymer_seq_one_letter_code"][entityIDX]
+		seq = seq.replace("\n","")
+		seqs[entity] = seq
+	return seqs
+
+def _is_denatured(nmrstar):
+	denatured = False
+	buffercomp = nmrstar.get_tag("_Sample_component.Mol_common_name")
+	for compi,comp in enumerate(buffercomp):
+		if re.search("urea|guanidine",comp.lower()):
+			denatured = True
+			break
+	return denatured
+
+def _check_local_dir(d):
+	d_path = Path(d)
+	if not d_path.is_dir():
+		raise ValueError('Missing NMRSTAR directory {}'.format(d))
+	return
+
+def _check_local_filepath(d,fn):
+	d_path = Path(d)
+	f_path = Path(d_path / fn )
+	if not f_path.is_file():
+		warnings.warn("Missing file: {}".format(str(f_path)))
+		return None
+	return str(f_path)
+
+def _get_NMRSTAR(eID,
+	local_files=True,
+	NMRSTAR_prefix="",
+	NMRSTAR_suffix=".str",
+	NMRSTAR_directory="./NMRSTAR"):
+	if local_files:
+		fn = NMRSTAR_prefix+str(eID)+NMRSTAR_suffix
+		f = _check_local_filepath(NMRSTAR_directory,fn)
+		if f is None:
+			return None
+		nmrstar = pynmrstar.Entry.from_file(str(f))
+	else:
+		nmrstar = pynmrstar.Entry.from_database(eID)
+	return nmrstar
+
+def _parse_nomenclature_table(fn="atom_nom.tbl"):
+	#path = 'classifiers/text_cat/README.md'  # always use slash
+	filepath = pkg_resources.resource_filename(__name__, fn)
+	d = {}
+	for l in open(filepath):
+		# This ignores terminal protons
+		if not l.strip() or l[0] in ["#","X"]:
+			continue
+		c = l.split('\t')
+		res = c[0]
+		if res not in d:
+			d[res] = {}
+		bmrb = c[2]
+		pdb = c[4]
+		d[res][bmrb] = pdb
+	return d
+
 
 def get_BMRB_entries():
 	base_link = "http://webapi.bmrb.wisc.edu/v2/"
@@ -62,23 +160,22 @@ def build_entry_database(entries,
 		PDB_match = open(PDBmatch_file).read()
 	PDBmatch_d = { l.split()[0] : [ x for x in l.split()[1].split(',') ] for l in PDB_match.split('\n')}
 	if local_files:
-		d = Path(NMRSTAR_directory)
-		if not d.is_dir():
-			raise ValueError('Cannot build BMRB database: missing NMRSTAR directory {}'.format(NMRSTAR_directory))
+		_check_local_dir(NMRSTAR_directory)
 
 	EntryDB = []
 	N = len(entries)
 	for i, eID in enumerate(entries):
 		perc = int(i*100/N)
 		print("\r  >> Building database: Entry {} ; Progress: {}/{} ({}%)     ".format(eID,i,N,perc), end='')
-		if local_files:
-			fn = Path(d / (NMRSTAR_prefix+eID+NMRSTAR_suffix))
-			if not fn.is_file():
-				warnings.warn("Ignoring BMRB entry {} due to missing file: {}".format(eID,str(fn)))
-				continue
-			nmrstar = pynmrstar.Entry.from_file(str(fn))
-		else:
-			nmrstar = pynmrstar.Entry.from_database(eID)
+
+		nmrstar = _get_NMRSTAR(eID,
+			local_files=local_files,
+			NMRSTAR_prefix=NMRSTAR_prefix,
+			NMRSTAR_suffix=NMRSTAR_suffix,
+			NMRSTAR_directory=NMRSTAR_directory)
+		if nmrstar is None:
+			continue
+
 		CS = nmrstar.get_loops_by_category("Atom_chem_shift")
 
 		# Ignore entries with no chemical shift information:
@@ -103,7 +200,7 @@ def build_entry_database(entries,
 		seqs = _extract_sequences(nmrstar,entities)
 
 		# Since we have only one entity - we have a single sequence:
-		seq = list(seqs.values())[0]
+		seq = list(seqs.values())[0].upper()
 
 		# Taking only the first PDB match
 		pdb = "XXXX"
@@ -210,59 +307,99 @@ def build_CS_database(EntryDB,
 	local_files=True,
 	NMRSTAR_directory="./NMRSTAR",
 	NMRSTAR_prefix="",
-	NMRSTAR_suffix=".str"):
+	NMRSTAR_suffix=".str",
+	tolerance=0.01,
+	return_discarded=False):
 
-	print("AQUI ESTOY")
+	if local_files:
+		_check_local_dir(NMRSTAR_directory)
 
-	return
+	atom_nom = _parse_nomenclature_table()
 
+	CD_db = []
+	N = len(EntryDB)
+	discarded = []
 
-def _extract_experimental_conditions(nmrstar,experimental_conditions=["ph","temperature"]):
-
-	conditions = nmrstar.get_tag("_Sample_condition_variable.Type")
-	conditions_val = nmrstar.get_tag("_Sample_condition_variable.Val")
-	# Make it lowercase to allow different capitalisations
-	conditions = [s.lower() for s in conditions]
-	conditions_d = {c : np.nan for c in experimental_conditions}
-
-	sample_type = nmrstar.get_tag("_Sample.Type")[0].lower()
-	# Micelles is found spelled in singular or plural - keep only singular
-	if sample_type == 'micelles':
-		sample_type = sample_type[:-1]
-
-	conditions_d["sample_type"] = sample_type
-	
-	for cond in experimental_conditions:
-		if cond not in conditions:
-			continue
-		val = conditions_val[conditions.index(cond)]
-		try:
-			val = float(val)
-			conditions_d[cond] = val
-		except ValueError:
+	for i, entry in EntryDB.iterrows():
+		eID = entry["BMRB_ID"]
+		perc = int(i*100/N)
+		print("\r  >> Building CS database: Entry {} ; Progress: {}/{} ({}%)     ".format(eID,i,N,perc), end='')
+		nmrstar = _get_NMRSTAR(eID,
+			local_files=local_files,
+			NMRSTAR_prefix=NMRSTAR_prefix,
+			NMRSTAR_suffix=NMRSTAR_suffix,
+			NMRSTAR_directory=NMRSTAR_directory)
+		if nmrstar is None:
 			continue
 
-	return conditions_d
+		cs_result_sets = []
+		for chemical_shift_loop in nmrstar.get_loops_by_category("Atom_chem_shift"):
+			cs_result_sets.append(chemical_shift_loop.get_tag(['Entity_ID',
+				'Comp_index_ID',
+				'Comp_ID',
+				'Atom_ID',
+				'Atom_type',
+				'Val',
+				'Val_err']))
 
-def _extract_sequences(nmrstar,entities):
-	seqd = nmrstar.get_tags(["_Entity.ID",
-		"_Entity.Name",
-		"_Entity.Polymer_seq_one_letter_code"])
-	seqs = {}
-	for entity in entities:
-		entityIDX = seqd["_Entity.ID"].index(entity)
-		seq = seqd["_Entity.Polymer_seq_one_letter_code"][entityIDX]
-		seq = seq.replace("\n","")
-		seqs[entity] = seq
-	return seqs
+		# Ignore entries with more than 1 CS set - there shouldn't be any as they were discarded before
+		if len(cs_result_sets) > 1:
+			continue
 
-def _is_denatured(nmrstar):
-	denatured = False
-	buffercomp = nmrstar.get_tag("_Sample_component.Mol_common_name")
-	for compi,comp in enumerate(buffercomp):
-		if re.search("urea|guanidine",comp.lower()):
-			denatured = True
-			break
-	return denatured
+		seq = entry["Sequence"]
+		Entry_CS = [ {"BMRB_ID":eID, 
+			"Res_ID": i+1,
+			"Residue":seq[i]}
+			for i in range(len(seq)) ]
 
+		CS = cs_result_sets[0]
+		discard = False
+		for x in CS:
+			CS_resid = int(x[1])
+			pos = CS_resid-1
+			res = x[2]
+			res = res[0]+res[1:].lower()
+			try:
+				res_1let = IUPACData.protein_letters_3to1[res].upper()
+			except KeyError:
+				res_1let = "X"
+			res_to_match = seq[pos]
+			if res_1let != res_to_match:
+				# Discard entry if sequence mismatch
+				discarded.append(eID)
+				discard = True
+				break
+			# Skip residues labeled X
+			if res_1let == "X":
+				continue
+			at = x[3]
+			if res_1let not in atom_nom or at not in atom_nom[res_1let]:
+				# Atoms not in the standard nomenclature
+				continue
+			try:
+				cs_val = float(x[5])
+			except ValueError:
+				continue
+			try:
+				cs_err = float(x[6])
+			except ValueError:
+				cs_err = np.nan
+			if at in Entry_CS[pos]:
+				if abs(cs_val - Entry_CS[pos][at]) > tolerance:
+					# Discard entry if multiple CS for the same atom
+					discarded.append(eID)
+					discard = True
+					break
+			Entry_CS[pos][at] = cs_val
+			Entry_CS[pos][at+"_Err"] = cs_err
+
+		if discard:
+			continue
+		CD_db.extend(Entry_CS)
+
+	CD_db = pd.DataFrame(CD_db)
+
+	if return_discarded:
+		return CD_db,discarded
+	return CD_db
 
