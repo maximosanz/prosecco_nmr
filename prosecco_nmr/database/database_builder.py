@@ -1,25 +1,31 @@
 import requests
-from pathlib import Path
 import pynmrstar
 import warnings
 import numpy as np
 import pandas as pd
-import time
 import re
 import subprocess
-from Bio.SeqUtils import IUPACData
 import pkg_resources
+import os
+import sys
+
+import Bio.PDB
+
+from sklearn.ensemble import IsolationForest
+from Bio.SeqUtils import IUPACData
+from pathlib import Path
 
 __all__ = ['get_BMRB_entries',
 	'get_NMRSTAR_files',
+	'get_PDB_files',
 	'build_entry_database',
 	'remove_entries',
 	'cluster_sequences',
-	'build_CS_database'
+	'build_CS_database',
+	'remove_outliers'
 	]
 
 __MY_APPLICATION__ = "PROSECCO-NMR"
-
 
 def _extract_experimental_conditions(nmrstar,experimental_conditions=["ph","temperature"]):
 
@@ -136,6 +142,28 @@ def get_NMRSTAR_files(entries,directory="./NMRSTAR",prefix="",suffix=".str"):
 		print("\r  >> Downloading NMRSTAR file for BMRB Entry {} Progress: {}/{} ({}%)     ".format(eID,i,N,perc), end='')
 		entry = pynmrstar.Entry.from_database(eID)
 		entry.write_to_file(str(fn))
+	return
+
+def get_PDB_files(PDBs,directory="./PDB",prefix="",suffix='.pdb'):
+	d = Path(directory)
+	d.mkdir(parents=True, exist_ok=True)
+	N = len(PDBs)
+	pdbl = Bio.PDB.PDBList()
+	for i, pdb_ID in enumerate(PDBs):
+		pdb_fn = Path(d / (prefix+pdb_ID+suffix))
+		# Ignore already downloaded files
+		if pdb_fn.is_file():
+			continue
+		perc = int(i*100/N)
+		print("\r  >> Downloading PDB file {} Progress: {}/{} ({}%)     ".format(pdb_ID,i,N,perc), end='')
+		old_stdout = sys.stdout
+		sys.stdout = open(os.devnull, "w")
+		pdbl.download_pdb_files([pdb_ID], pdir=str(directory), file_format='pdb',obsolete=False)
+		sys.stdout = old_stdout
+		# Biopython uses a strange file naming...
+		downloaded_fn = Path(d / ("pdb"+pdb_ID.lower()+".ent"))
+		if downloaded_fn.is_file():
+			os.rename(downloaded_fn, pdb_fn)
 	return
 
 def build_entry_database(entries,
@@ -316,7 +344,7 @@ def build_CS_database(EntryDB,
 
 	atom_nom = _parse_nomenclature_table()
 
-	CD_db = []
+	CS_db = []
 	N = len(EntryDB)
 	discarded = []
 
@@ -395,11 +423,31 @@ def build_CS_database(EntryDB,
 
 		if discard:
 			continue
-		CD_db.extend(Entry_CS)
+		CS_db.extend(Entry_CS)
 
-	CD_db = pd.DataFrame(CD_db)
+	CS_db = pd.DataFrame(CS_db)
 
 	if return_discarded:
-		return CD_db,discarded
-	return CD_db
+		return CS_db,discarded
+	return CS_db
 
+def remove_outliers(CS_db,contamination=0.01):
+	atom_nom = _parse_nomenclature_table()
+	for i,res in enumerate(atom_nom):
+		print("\r  >> Removing outliers for residue {} ({} / {})     ".format(res,i+1,len(atom_nom)), end='')
+		res_IDX = CS_db['Residue'] == res
+		for at in atom_nom[res]:
+			x = CS_db[res_IDX]
+			if at not in x.columns:
+				continue
+			OutlierModel = IsolationForest(contamination=contamination,bootstrap=True)
+			at_cs = x[at].values
+			noNaN_IDX = ~np.isnan(at_cs)
+			at_cs_noNaN = at_cs[noNaN_IDX]
+			at_cs_pred = at_cs_noNaN.reshape(-1,1)
+			outlier_pred = OutlierModel.fit_predict(at_cs_pred)
+			outliers = (outlier_pred-1).astype(bool)
+			at_cs_noNaN[outliers] = np.nan
+			at_cs[noNaN_IDX] = at_cs_noNaN
+			CS_db.loc[res_IDX,at] = at_cs
+	return CS_db
