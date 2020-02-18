@@ -20,13 +20,17 @@ from pathlib import Path
 __all__ = ['get_BMRB_entries',
 	'get_NMRSTAR_files',
 	'get_PDB_files',
+	'get_all_PDB_files',
 	'build_entry_database',
 	'remove_entries',
 	'cluster_sequences',
 	'build_CS_database',
+	'include_PSIPRED',
+	'run_PSIPRED',
 	'remove_outliers',
 	'cluster_cystines',
-	'cluster_transP'
+	'cluster_transPRO',
+	'cluster_protHIS'
 	]
 
 __MY_APPLICATION__ = "PROSECCO-NMR"
@@ -82,7 +86,7 @@ def _is_denatured(nmrstar):
 def _check_local_dir(d):
 	d_path = Path(d)
 	if not d_path.is_dir():
-		raise ValueError('Missing NMRSTAR directory {}'.format(d))
+		raise ValueError('Missing directory {}'.format(d))
 	return
 
 def _check_local_filepath(d,fn):
@@ -125,6 +129,11 @@ def _parse_nomenclature_table(fn="atom_nom.tbl"):
 		d[res][bmrb] = pdb
 	return d
 
+def _dump_seq(f,seq,seqID,n=60):
+	f.write(">{}\n".format(seqID))
+	splitseq = [ seq[i:i+n] for i in range(0,len(seq),n) ]
+	[ f.write(segment+'\n') for segment in splitseq ]
+	return
 
 def get_BMRB_entries():
 	base_link = "http://webapi.bmrb.wisc.edu/v2/"
@@ -170,6 +179,16 @@ def get_PDB_files(PDBs,directory="./PDB",prefix="",suffix='.pdb'):
 			os.rename(downloaded_fn, pdb_fn)
 	return
 
+def get_all_PDB_files(directory="./PDB",prefix="",suffix='.pdb'):
+	PDB_match = requests.get("http://webapi.bmrb.wisc.edu/v2/mappings/bmrb/pdb?format=text&match_type=exact",
+			headers={"Application":__MY_APPLICATION__}).text
+	PDBmatch_d = { l.split()[0] : [ x for x in l.split()[1].split(',') ] for l in PDB_match.split('\n') }
+	PDBs = []
+	for BMRB, pdb in PDBmatch_d.items():
+		PDBs.extend(pdb)
+	get_PDB_files(PDBs,directory=directory,prefix=prefix,suffix=suffix)
+	return
+
 def build_entry_database(entries,
 	local_files=True,
 	NMRSTAR_directory="./NMRSTAR",
@@ -177,7 +196,11 @@ def build_entry_database(entries,
 	NMRSTAR_suffix=".str",
 	PDBmatch_file=None,
 	experimental_conditions=["ph","temperature","pressure"],
-	record_denaturant=True):
+	record_denaturant=True,
+	local_PDB_files=True,
+	PDB_directory="./PDB",
+	PDB_prefix="",
+	PDB_suffix=".pdb"):
 
 	'''
 	Build a pandas dataframe containing the information on the BMRB entries listed in "entries"
@@ -193,6 +216,9 @@ def build_entry_database(entries,
 	PDBmatch_d = { l.split()[0] : [ x for x in l.split()[1].split(',') ] for l in PDB_match.split('\n')}
 	if local_files:
 		_check_local_dir(NMRSTAR_directory)
+	if local_PDB_files:
+		_check_local_dir(PDB_directory)
+		PDB_parser = Bio.PDB.PDBParser(QUIET=True)
 
 	EntryDB = []
 	N = len(entries)
@@ -222,7 +248,7 @@ def build_entry_database(entries,
 
 		# Ignore nucleotide entries
 		polymer_type = nmrstar.get_tag("Entity.Polymer_type")[0].lower()
-		if re.search("nucleotide",polymer_type):
+		if re.search("nucleotide|polysaccharide|other|dna|cyclic",polymer_type):
 			continue
 
 		nCS = len(CS[0])
@@ -234,16 +260,35 @@ def build_entry_database(entries,
 		# Since we have only one entity - we have a single sequence:
 		seq = list(seqs.values())[0].upper()
 
-		# Taking only the first PDB match
+		# Taking the first matching PDB
 		pdb = "XXXX"
-		if eID in PDBmatch_d:
-			pdb = PDBmatch_d[eID][0]
+		PDB_match = (0,0,0,0)
+		eID_str = str(eID)
+		if eID_str in PDBmatch_d:
+			if not local_PDB_files:
+				pdb = PDBmatch_d[eID_str][0]
+			else:
+				for pdb in PDBmatch_d[eID_str]:
+					PDB_match = None
+					fn = Path(PDB_directory) / Path(PDB_prefix+pdb.upper()+PDB_suffix)
+					if fn.is_file():
+						structure = PDB_parser.get_structure(pdb, str(fn))
+						PDB_match = _match_PDBseq(structure,seq)
+						if PDB_match is not None:
+							break
+			if PDB_match is None:
+				pdb = "XXXX"
+				PDB_match = (0,0,0,0)
 
 		Entry_d = {"BMRB_ID" : eID,
 			"N_CS" : nCS,
 			"Sequence" : seq,
 			"PDB_ID" : pdb,
-			"polymer_type" : polymer_type
+			"polymer_type" : polymer_type,
+			"PDB_Chain_Match" : PDB_match[3],
+			"PDB_Match_Start" : PDB_match[0],
+			"BMRB_Match_Start" : PDB_match[1],
+			"PDB_Match_Length" : PDB_match[2],
 			}
 
 		for cond in conditions_d:
@@ -254,6 +299,32 @@ def build_entry_database(entries,
 
 	EntryDB = pd.DataFrame(EntryDB)
 	return EntryDB
+
+def _match_PDBseq(PDB_structure,seq):
+	model = PDB_structure[0]
+	# First_match is a len=4 tuple that contains the first position matching in the PDB, in the BMRB,
+	# the length of the match and the PDB chain ID
+	First_match = None
+	for chain in model:
+		PDB_seq = ''
+		for residue in chain:
+			r = residue.get_resname()
+			r = r[0].upper()+r[1:].lower()
+			try:
+				r = IUPACData.protein_letters_3to1[r].upper()
+			except KeyError:
+				r = "X"
+			PDB_seq += r
+			# Removing C-terminal "X" residues if any
+			PDB_seq = PDB_seq.rstrip("X")
+		if re.search(PDB_seq,seq):
+			First_match = (0,re.search(PDB_seq,seq).start(),len(PDB_seq),chain.id)
+			return First_match
+		elif re.search(seq,PDB_seq):
+			First_match = (re.search(seq,PDB_seq).start(),0,len(seq),chain.id)
+			return First_match
+	return None
+
 
 
 def remove_entries(EntryDB,
@@ -287,7 +358,6 @@ def cluster_sequences(EntryDB,
 	centroids_fn="centroids.fasta",
 	clusters_fn="clusters.uc",
 	reset_index=True):
-
 	'''
 	Cluster the sequences using the UCLUST algorithm
 	and return a database with only the cluster centroids
@@ -298,7 +368,6 @@ def cluster_sequences(EntryDB,
 	UCLUST is a greedy algorithm that tries to find cluster centroid first - so the order of sequences matters
 	I will list sequences with a PDB match first, in descending order of number of chemical shift data
 	'''
-
 	seqs = []
 	IDs = []
 
@@ -312,10 +381,7 @@ def cluster_sequences(EntryDB,
 	seqf = open(seq_fn,'w')
 
 	for i,seq in enumerate(seqs):
-		seqf.write(">{}\n".format(IDs[i]))
-		n=60
-		splitseq = [ seq[i:i+n] for i in range(0,len(seq),n) ]
-		[ seqf.write(segment+'\n') for segment in splitseq ]
+		_dump_seq(seqf,seq,IDs[i])
 
 	seqf.close()
 
@@ -333,7 +399,6 @@ def cluster_sequences(EntryDB,
 		EntryDB = EntryDB.reset_index(drop=True)
 
 	return EntryDB
-
 
 def build_CS_database(EntryDB,
 	local_files=True,
@@ -435,6 +500,60 @@ def build_CS_database(EntryDB,
 		return CS_db,discarded
 	return CS_db
 
+def include_PSIPRED(CS_db,
+	PSIPRED_directory="./PSIPRED",
+	PSIPRED_prefix="",
+	PSIPRED_suffix=".ss2"):
+	# This requires previously computed PSIPRED files for each entry
+	Q3_names = ["C","H","E"]
+	Column_names = ["PSIPRED_"+q for q in Q3_names]
+	for c in Column_names:
+		CS_db.loc[:,c] = np.nan
+	d = Path(PSIPRED_directory)
+	entries = list(CS_db["BMRB_ID"].value_counts().keys())
+	N = len(entries)
+	for i, eID in enumerate(entries):
+		fn = d / Path(PSIPRED_prefix+str(eID)+PSIPRED_suffix)
+		if not fn.is_file():
+			continue
+		perc = int(i*100/N)
+		print("\r  >> Including PSIPRED info: Entry {} ; Progress: {}/{} ({}%)     ".format(eID,i,N,perc), end='')
+		Entry_IDX = (CS_db["BMRB_ID"] == eID)
+		Entry_CS = CS_db[Entry_IDX]
+		ss2f = open(str(fn))
+		psipred_seq, psipred_arr = _parse_ss2(ss2f)
+		ss2f.close()
+		seq = "".join(Entry_CS["Residue"].values)
+		if seq != psipred_seq:
+			continue
+		CS_db.loc[Entry_IDX,Column_names] = psipred_arr
+	return CS_db
+
+def _parse_ss2(ss2f):
+	ls = ss2f.readlines()
+	psipred_arr = np.array([l.split()[3:] for l in ls[2:]])
+	seq = "".join([l.split()[1] for l in ls[2:]])
+	return seq,psipred_arr
+
+def run_PSIPRED(EntryDB,directory="./PSIPRED",seqfn="Sequences.fasta",prefix="",suffix=".ss2",psipred_exe="psipred"):
+	# This requires an installation of blast, PSIPRED, and the uniref90filt database 
+	d = Path(directory)
+	d.mkdir(parents=True, exist_ok=True)
+	cwd = os.getcwd()
+	os.chdir(str(d))
+	o = open(seqfn,'w')
+	for i,entry in EntryDB.iterrows():
+		eID = entry["BMRB_ID"]
+		seq = entry["Sequence"]
+		check_fn = d / Path(prefix+str(eID)+suffix)
+		if check_fn.is_file():
+			continue
+		_dump_seq(o,seq,eID)
+	o.close()
+	subprocess.run([psipred_exe, seqfn])
+	os.chdir(cwd)
+	return
+
 def remove_outliers(CS_db,contamination=0.01):
 	atom_nom = _parse_nomenclature_table()
 	for i,res in enumerate(atom_nom):
@@ -459,8 +578,11 @@ def remove_outliers(CS_db,contamination=0.01):
 def cluster_cystines(CS_db,atoms=["CA","CB"]):
 	return _cluster_byCS(CS_db,"C",atoms,"Cystine")
 
-def cluster_transP(CS_db,atoms=["CB","CG","CD"]):
+def cluster_transPRO(CS_db,atoms=["CB","CG","CD"]):
 	return _cluster_byCS(CS_db,"P",atoms,"Trans",n_clusters=3,true_idx=2)
+
+def cluster_protHIS(CS_db,atoms=["CA","CB","CD2"]):
+	return _cluster_byCS(CS_db,"H",atoms,"Protonated",n_clusters=2,true_idx=1)
 
 def _cluster_byCS(CS_db,residue,atoms,attribute,n_clusters=2,true_idx=1,linkage='ward'):
 	CS_db[attribute] = False
@@ -477,4 +599,5 @@ def _cluster_byCS(CS_db,residue,atoms,attribute,n_clusters=2,true_idx=1,linkage=
 	true_attr[~NaN_IDX] = (labels == true_idx)
 	CS_db.loc[Res_Idx,attribute] = true_attr
 	return CS_db
+
 
