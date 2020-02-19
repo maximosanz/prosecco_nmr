@@ -30,7 +30,9 @@ __all__ = ['get_BMRB_entries',
 	'remove_outliers',
 	'cluster_cystines',
 	'cluster_transPRO',
-	'cluster_protHIS'
+	'cluster_protHIS',
+	'check_referencing',
+	'keep_entries'
 	]
 
 __MY_APPLICATION__ = "PROSECCO-NMR"
@@ -113,7 +115,6 @@ def _get_NMRSTAR(eID,
 	return nmrstar
 
 def _parse_nomenclature_table(fn="atom_nom.tbl"):
-	#path = 'classifiers/text_cat/README.md'  # always use slash
 	filepath = pkg_resources.resource_filename(__name__, fn)
 	d = {}
 	for l in open(filepath):
@@ -128,6 +129,13 @@ def _parse_nomenclature_table(fn="atom_nom.tbl"):
 		pdb = c[4]
 		d[res][bmrb] = pdb
 	return d
+
+def _get_all_atnames(fn="atom_nom.tbl"):
+	d = _parse_nomenclature_table(fn)
+	ats = set([])
+	for key, value in d.items():
+		ats.update(value)
+	return list(ats)
 
 def _dump_seq(f,seq,seqID,n=60):
 	f.write(">{}\n".format(seqID))
@@ -200,7 +208,8 @@ def build_entry_database(entries,
 	local_PDB_files=True,
 	PDB_directory="./PDB",
 	PDB_prefix="",
-	PDB_suffix=".pdb"):
+	PDB_suffix=".pdb",
+	do_dssp=True):
 
 	'''
 	Build a pandas dataframe containing the information on the BMRB entries listed in "entries"
@@ -263,6 +272,7 @@ def build_entry_database(entries,
 		# Taking the first matching PDB
 		pdb = "XXXX"
 		PDB_match = (0,0,0,0)
+		dssp = np.nan
 		eID_str = str(eID)
 		if eID_str in PDBmatch_d:
 			if not local_PDB_files:
@@ -275,6 +285,9 @@ def build_entry_database(entries,
 						structure = PDB_parser.get_structure(pdb, str(fn))
 						PDB_match = _match_PDBseq(structure,seq)
 						if PDB_match is not None:
+							dssp = _get_DSSP(structure,str(fn),PDB_match[3])
+							dssp = "X"*PDB_match[1]+dssp[PDB_match[0]:PDB_match[0]+PDB_match[2]]
+							dssp += "X"*(len(seq)-len(dssp))
 							break
 			if PDB_match is None:
 				pdb = "XXXX"
@@ -289,6 +302,7 @@ def build_entry_database(entries,
 			"PDB_Match_Start" : PDB_match[0],
 			"BMRB_Match_Start" : PDB_match[1],
 			"PDB_Match_Length" : PDB_match[2],
+			"DSSP" : dssp
 			}
 
 		for cond in conditions_d:
@@ -299,6 +313,12 @@ def build_entry_database(entries,
 
 	EntryDB = pd.DataFrame(EntryDB)
 	return EntryDB
+
+def _get_DSSP(PDB_structure,fn,chain):
+	model = PDB_structure[0]
+	dssp = Bio.PDB.DSSP(model,fn)
+	dssp_str = "".join([ dssp[k][2] for k in dssp.keys() if k[0] == chain ] )
+	return dssp_str
 
 def _match_PDBseq(PDB_structure,seq):
 	model = PDB_structure[0]
@@ -509,6 +529,7 @@ def include_PSIPRED(CS_db,
 	Column_names = ["PSIPRED_"+q for q in Q3_names]
 	for c in Column_names:
 		CS_db.loc[:,c] = np.nan
+	_check_local_dir(PSIPRED_directory)
 	d = Path(PSIPRED_directory)
 	entries = list(CS_db["BMRB_ID"].value_counts().keys())
 	N = len(entries)
@@ -553,6 +574,45 @@ def run_PSIPRED(EntryDB,directory="./PSIPRED",seqfn="Sequences.fasta",prefix="",
 	subprocess.run([psipred_exe, seqfn])
 	os.chdir(cwd)
 	return
+
+def check_referencing(CS_db,EntryDB,removesigma=1.5,atoms=["CA","CB","C","H","HA","N"]):
+	SS = ["C","H","E"]
+	Res = list(CS_db["Residue"].value_counts().keys())
+	Mean_CS = np.zeros((len(Res),len(SS),len(atoms)))
+	Mean_CS[:] = np.nan
+	PSIPRED = np.array([ np.array(CS_db["PSIPRED_{}".format(ss)]) for ss in SS]).T
+	PSIPRED_assigned = PSIPRED.argmax(1)
+	for iR, r in enumerate(Res):
+		Res_IDX = CS_db["Residue"] == r
+		X = CS_db[Res_IDX]
+		SSMax = PSIPRED_assigned[Res_IDX]
+		for iSS, ss in enumerate(SS):
+			X_SS = X[SSMax==iSS]
+			for iA, at in enumerate(atoms):
+				cs = np.nanmean(X_SS[at])
+				if np.isnan(cs):
+					continue
+				Mean_CS[iR,iSS,iA] = cs
+	N = len(EntryDB)
+	for i, Entry in EntryDB.iterrows():
+		eID = Entry["BMRB_ID"]
+		perc = int(i*100/N)
+		print("\r>> Checking referencing: Entry {} ; {}/{} ({}%)  ".format(eID,i,N,perc), end='')
+		Entry_IDX = CS_db["BMRB_ID"] == eID
+		Entry_Rows = CS_db[Entry_IDX]
+		Entry_CS = np.array(Entry_Rows.loc[:,atoms])
+		if not Entry_CS.shape[0]:
+			continue
+		seq = Entry["Sequence"]
+		SSMax = PSIPRED_assigned[Entry_IDX]
+		seq_idx = [ Res.index(r) for r in seq ]
+		Ref_CS = Mean_CS[seq_idx,SSMax,:]
+		diff = np.nanmean(Entry_CS - Ref_CS,axis=0)
+		sigma = np.nanstd(Entry_CS,axis=0)
+		bad_ref = np.absolute(diff) > sigma*removesigma
+		if (np.any(bad_ref)):
+			CS_db.loc[Entry_IDX,np.array(atoms)[bad_ref]] = np.nan
+	return CS_db
 
 def remove_outliers(CS_db,contamination=0.01):
 	atom_nom = _parse_nomenclature_table()
@@ -599,5 +659,37 @@ def _cluster_byCS(CS_db,residue,atoms,attribute,n_clusters=2,true_idx=1,linkage=
 	true_attr[~NaN_IDX] = (labels == true_idx)
 	CS_db.loc[Res_Idx,attribute] = true_attr
 	return CS_db
+
+def keep_entries(Entries,CS_db,recount=True):
+	CS_entries = CS_db["BMRB_ID"].values
+	valid_entries = Entries["BMRB_ID"].values
+	CS_db = CS_db.loc[np.isin(CS_entries,valid_entries)]
+	CS_entries = CS_db["BMRB_ID"].values
+	if recount:
+		N = len(Entries)
+		ats = np.array(_get_all_atnames())
+		ats = ats[np.isin(ats,CS_db.columns)]
+		for i,entry in Entries.iterrows():
+			eID = entry["BMRB_ID"]
+			perc = int(i*100/N)
+			print("\r  >> Keeping entries in both databases: {} / {} ({}%)     ".format(i,N,perc), end='')
+			if eID not in CS_entries:
+				continue
+			Entry_IDX = (CS_entries == eID)
+			Entry_CS = np.array(CS_db.loc[Entry_IDX,ats])
+			N_CS = np.sum(~np.isnan(Entry_CS))
+			Entries.loc[i,"N_CS"] = N_CS
+			if not N_CS:
+				# Remove entries with no chemical shifts
+				CS_db = CS_db.loc[~Entry_IDX]
+				Entries = Entries.drop([i])
+				CS_entries = CS_db["BMRB_ID"].values
+	CS_entries = list(CS_db["BMRB_ID"].value_counts().keys())
+	Entries = Entries.loc[np.isin(Entries["BMRB_ID"].values,CS_entries)]
+	return Entries, CS_db
+
+
+
+
 
 
