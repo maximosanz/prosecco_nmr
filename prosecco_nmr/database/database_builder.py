@@ -286,6 +286,9 @@ def build_entry_database(entries,
 						PDB_match = _match_PDBseq(structure,seq)
 						if PDB_match is not None:
 							dssp = _get_DSSP(structure,str(fn),PDB_match[3])
+							if dssp is None:
+								PDB_match = None
+								continue
 							dssp = "X"*PDB_match[1]+dssp[PDB_match[0]:PDB_match[0]+PDB_match[2]]
 							dssp += "X"*(len(seq)-len(dssp))
 							break
@@ -316,8 +319,11 @@ def build_entry_database(entries,
 
 def _get_DSSP(PDB_structure,fn,chain):
 	model = PDB_structure[0]
-	dssp = Bio.PDB.DSSP(model,fn)
-	dssp_str = "".join([ dssp[k][2] for k in dssp.keys() if k[0] == chain ] )
+	try:
+		dssp = Bio.PDB.DSSP(model,fn)
+		dssp_str = "".join([ dssp[k][2] for k in dssp.keys() if k[0] == chain ] )
+	except:
+		dssp_str = None
 	return dssp_str
 
 def _match_PDBseq(PDB_structure,seq):
