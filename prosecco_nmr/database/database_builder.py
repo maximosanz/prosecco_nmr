@@ -568,16 +568,17 @@ def run_PSIPRED(EntryDB,directory="./PSIPRED",seqfn="Sequences.fasta",prefix="",
 	d.mkdir(parents=True, exist_ok=True)
 	cwd = os.getcwd()
 	os.chdir(str(d))
-	o = open(seqfn,'w')
+	
 	for i,entry in EntryDB.iterrows():
 		eID = entry["BMRB_ID"]
 		seq = entry["Sequence"]
-		check_fn = d / Path(prefix+str(eID)+suffix)
+		check_fn = Path(prefix+str(eID)+suffix)
 		if check_fn.is_file():
 			continue
+		o = open(seqfn,'w')
 		_dump_seq(o,seq,eID)
-	o.close()
-	subprocess.run([psipred_exe, seqfn])
+		o.close()
+		subprocess.run([psipred_exe, seqfn])
 	os.chdir(cwd)
 	return
 
