@@ -567,15 +567,14 @@ def _parse_ss2(ss2f):
 	return seq,psipred_arr
 
 def run_PSIPRED(EntryDB,directory="./PSIPRED",prefix="",suffix=".ss2",psipred_exe="psipred",skipf=None):
+	skip_entries = []
+	if skipf is not None:
+		skip_entries = set([ l.strip() for l in open(skipf) ])
 	# This requires an installation of blast, PSIPRED, and the uniref90filt database 
 	d = Path(directory)
 	d.mkdir(parents=True, exist_ok=True)
 	cwd = os.getcwd()
 	os.chdir(str(d))
-
-	skip_entries = []
-	if skipf is not None:
-		skip_entries = set([ l.strip() for l in open(skipf) ])
 	for i,entry in EntryDB.iterrows():
 		eID = entry["BMRB_ID"]
 		seq = entry["Sequence"]
