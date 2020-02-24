@@ -480,6 +480,10 @@ def build_CS_database(EntryDB,
 		for x in CS:
 			CS_resid = int(x[1])
 			pos = CS_resid-1
+			if pos >= len(seq):
+				discarded.append(eID)
+				discard = True
+				break
 			res = x[2]
 			res = res[0]+res[1:].lower()
 			try:
@@ -562,16 +566,21 @@ def _parse_ss2(ss2f):
 	seq = "".join([l.split()[1] for l in ls[2:]])
 	return seq,psipred_arr
 
-def run_PSIPRED(EntryDB,directory="./PSIPRED",prefix="",suffix=".ss2",psipred_exe="psipred"):
+def run_PSIPRED(EntryDB,directory="./PSIPRED",prefix="",suffix=".ss2",psipred_exe="psipred",skipf=None):
 	# This requires an installation of blast, PSIPRED, and the uniref90filt database 
 	d = Path(directory)
 	d.mkdir(parents=True, exist_ok=True)
 	cwd = os.getcwd()
 	os.chdir(str(d))
-	
+
+	skip_entries = []
+	if skipf is not None:
+		skip_entries = set([ l.strip() for l in open(skipf) ])
 	for i,entry in EntryDB.iterrows():
 		eID = entry["BMRB_ID"]
 		seq = entry["Sequence"]
+		if str(eID) in skip_entries:
+			continue
 		check_fn = Path(prefix+str(eID)+suffix)
 		if check_fn.is_file():
 			continue
