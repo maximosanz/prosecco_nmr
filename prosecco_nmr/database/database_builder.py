@@ -33,7 +33,8 @@ __all__ = ['get_BMRB_entries',
 	'cluster_protHIS',
 	'check_referencing',
 	'keep_entries',
-	'atom_names'
+	'atom_names',
+	'pick_cluster_centers'
 	]
 
 __MY_APPLICATION__ = "PROSECCO-NMR"
