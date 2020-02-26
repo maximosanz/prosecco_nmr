@@ -32,7 +32,8 @@ __all__ = ['get_BMRB_entries',
 	'cluster_transPRO',
 	'cluster_protHIS',
 	'check_referencing',
-	'keep_entries'
+	'keep_entries',
+	'atom_names'
 	]
 
 __MY_APPLICATION__ = "PROSECCO-NMR"
@@ -137,6 +138,8 @@ def _get_all_atnames(fn="atom_nom.tbl"):
 		ats.update(value)
 	return list(ats)
 
+atom_names = _get_all_atnames()
+
 def _dump_seq(f,seq,seqID,n=60):
 	f.write(">{}\n".format(seqID))
 	splitseq = [ seq[i:i+n] for i in range(0,len(seq),n) ]
@@ -209,7 +212,8 @@ def build_entry_database(entries,
 	PDB_directory="./PDB",
 	PDB_prefix="",
 	PDB_suffix=".pdb",
-	do_dssp=True):
+	do_dssp=True,
+	remove_if_X=0.8):
 
 	'''
 	Build a pandas dataframe containing the information on the BMRB entries listed in "entries"
@@ -268,6 +272,12 @@ def build_entry_database(entries,
 
 		# Since we have only one entity - we have a single sequence:
 		seq = list(seqs.values())[0].upper()
+
+		# We will ignore the entry if the fraction of "X" residues is more than remove_if_X
+		N_X = len([ "X" for ch in seq if ch == "X"])
+		f_X = float(N_X)/len(seq)
+		if f_X > remove_if_X:
+			continue
 
 		# Taking the first matching PDB
 		pdb = "XXXX"
@@ -381,28 +391,19 @@ def cluster_sequences(EntryDB,
 	similarity=0.9,
 	usearch_exe="usearch",
 	seq_fn="entries.fasta",
-	centroids_fn="centroids.fasta",
+	distmx_fn="distmx.txt",
 	clusters_fn="clusters.uc",
-	reset_index=True):
+	linkage="min"):
 	'''
 	Cluster the sequences using the UCLUST algorithm
-	and return a database with only the cluster centroids
+	and return a database with cluster labels
+	Agglomerative clustering with single linkage
 
 	The usearch executable must be accessible, it can be downloaded from:
 	https://drive5.com/usearch/ - 2020-02-11
-
-	UCLUST is a greedy algorithm that tries to find cluster centroid first - so the order of sequences matters
-	I will list sequences with a PDB match first, in descending order of number of chemical shift data
 	'''
-	seqs = []
-	IDs = []
-
-	idx = EntryDB["PDB_ID"] == "XXXX"
-	for i in range(2):
-		idx = ~idx
-		subset = EntryDB[idx].sort_values("N_CS",ascending=False)
-		seqs.extend(list(subset["Sequence"].values))
-		IDs.extend(list(subset["BMRB_ID"].values))
+	seqs = EntryDB["Sequence"].values
+	IDs = EntryDB["BMRB_ID"].values
 
 	seqf = open(seq_fn,'w')
 
@@ -412,19 +413,44 @@ def cluster_sequences(EntryDB,
 	seqf.close()
 
 	subprocess.run([usearch_exe,
-		"-cluster_fast", seq_fn,
-		"-id", str(similarity),
-		"-centroids",centroids_fn,
-		"-uc",clusters_fn
+		"-calc_distmx", seq_fn,
+		"-tabbedout",distmx_fn,
+		"-maxdist","{:4.2f}".format(1.0-similarity)
 		])
 
-	centroids = [ l[1:].strip() for l in open(centroids_fn) if l[0] == ">" ]
-	EntryDB = EntryDB[np.isin(EntryDB["BMRB_ID"],centroids)]
+	subprocess.run([usearch_exe,
+		"-cluster_aggd", distmx_fn,
+		"-clusterout",clusters_fn,
+		"-id","{:4.2f}".format(similarity),
+		"-linkage",linkage
+		])
 
-	if reset_index:
-		EntryDB = EntryDB.reset_index(drop=True)
+	labelsf = open(clusters_fn)
+	EntryDB["Cluster_label"] = -1
+	for l in labelsf:
+		c = l.split()
+		eID = int(c[1])
+		label = int(c[0])
+		EntryDB.loc[EntryDB["BMRB_ID"] == eID,"Cluster_label"] = label
 
 	return EntryDB
+
+def pick_cluster_centers(EntryDB,
+	PDB_priority=True):
+	# Choose one entry to keep for each cluster
+	# Entries with most chemical shifts are prioritized
+	# One can choose to give higher priority to having a PDB match (true by default)
+	Sort = EntryDB.sort_values(by="N_CS",ascending=False)
+	if PDB_priority:
+		idx = Sort["PDB_ID"] != "XXXX"
+		cat = []
+		for i in range(2):
+			df = Sort.iloc[np.where(idx)]
+			idx = 1 - idx
+			cat.append(df)
+		Sort = pd.concat(cat)
+	labels, idx = np.unique(Sort["Cluster_label"],return_index=True)
+	return Sort.iloc[idx]
 
 def build_CS_database(EntryDB,
 	local_files=True,
