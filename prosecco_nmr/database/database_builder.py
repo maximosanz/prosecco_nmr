@@ -213,7 +213,6 @@ def build_entry_database(entries,
 	PDB_directory="./PDB",
 	PDB_prefix="",
 	PDB_suffix=".pdb",
-	do_dssp=True,
 	remove_if_X=0.8):
 
 	'''
@@ -437,7 +436,8 @@ def cluster_sequences(EntryDB,
 	return EntryDB
 
 def pick_cluster_centers(EntryDB,
-	PDB_priority=True):
+	PDB_priority=True,
+	reset_index=True):
 	# Choose one entry to keep for each cluster
 	# Entries with most chemical shifts are prioritized
 	# One can choose to give higher priority to having a PDB match (true by default)
@@ -451,7 +451,10 @@ def pick_cluster_centers(EntryDB,
 			cat.append(df)
 		Sort = pd.concat(cat)
 	labels, idx = np.unique(Sort["Cluster_label"],return_index=True)
-	return Sort.iloc[idx]
+	Sort = Sort.iloc[idx]
+	if reset_index:
+		Sort = Sort.reset_index(drop=True)
+	return Sort
 
 def build_CS_database(EntryDB,
 	local_files=True,
