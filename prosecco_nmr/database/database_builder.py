@@ -563,7 +563,9 @@ def build_CS_database(EntryDB,
 def include_PSIPRED(CS_db,
 	PSIPRED_directory="./PSIPRED",
 	PSIPRED_prefix="",
-	PSIPRED_suffix=".ss2"):
+	PSIPRED_suffix=".ss2",
+	remove_missing=True,
+	reset_index=True):
 	# This requires previously computed PSIPRED files for each entry
 	Q3_names = ["C","H","E"]
 	Column_names = ["PSIPRED_"+q for q in Q3_names]
@@ -573,9 +575,11 @@ def include_PSIPRED(CS_db,
 	d = Path(PSIPRED_directory)
 	entries = list(CS_db["BMRB_ID"].value_counts().keys())
 	N = len(entries)
+	bad_PSIPRED = []
 	for i, eID in enumerate(entries):
 		fn = d / Path(PSIPRED_prefix+str(eID)+PSIPRED_suffix)
 		if not fn.is_file():
+			bad_PSIPRED.append(eID)
 			continue
 		perc = int(i*100/N)
 		print("\r  >> Including PSIPRED info: Entry {} ; Progress: {}/{} ({}%)     ".format(eID,i,N,perc), end='')
@@ -586,8 +590,14 @@ def include_PSIPRED(CS_db,
 		ss2f.close()
 		seq = "".join(Entry_CS["Residue"].values)
 		if seq != psipred_seq:
+			bad_PSIPRED.append(eID)
 			continue
 		CS_db.loc[Entry_IDX,Column_names] = psipred_arr
+	if remove_missing:
+		for eID in bad_PSIPRED:
+			CS_db = CS_db[ CS_db["BMRB_ID"] != eID ]
+	if reset_index:
+		CS_db = CS_db.reset_index(drop=True)
 	return CS_db
 
 def _parse_ss2(ss2f):

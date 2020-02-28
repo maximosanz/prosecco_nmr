@@ -1,9 +1,11 @@
 import numpy as np
 import pandas as pd
+import tensorflow as tf
 import warnings
 from .residue_info import RESIDUES, BLOSUM62
 
-__all__ = ['make_NN_arrays'
+__all__ = ['make_NN_arrays',
+	'make_PROSECCO_nn'
 	]
 
 def _is_outofbounds(pos,NRes,N_neigh):
@@ -16,6 +18,18 @@ def _is_outofbounds(pos,NRes,N_neigh):
 		isOut[-(last-NRes):] = True
 	return isOut
 
+def make_PROSECCO_nn(N_Atoms=1,
+	N_Inputs=143,
+	N_Hidden=50,
+	activation='tanh',
+	optimizer='adam',
+	loss='mean_squared_error'):
+	PROSECCOnet = tf.keras.Sequential()
+	PROSECCOnet.add(tf.keras.layers.Dense(N_Hidden, input_dim=N_Inputs, activation=activation))
+	PROSECCOnet.add(tf.keras.layers.Dense(N_Atoms))
+	PROSECCOnet.compile(loss=loss, optimizer=optimizer)
+	return PROSECCOnet
+
 def make_NN_arrays(EntryDB,
 	CSdb,
 	atoms=["CA","CB","C","HA","H","N"],
@@ -25,7 +39,8 @@ def make_NN_arrays(EntryDB,
 	SS_type="PSIPRED",
 	seq_Nodes=23,
 	SS_Nodes=4,
-	return_BMRBmap=False):
+	return_BMRBmap=False,
+	ignore_NaN=True):
 	'''
 	This function makes an input and output array for the neural network from the CSV files.
 	The input consists of a window of residues with sequence and secondary structure information.
@@ -68,6 +83,11 @@ def make_NN_arrays(EntryDB,
 		for j,cs in eCS.iterrows():
 			pos = cs["Res_ID"]-1
 			res = cs["Residue"]
+
+			cs_values = cs[atoms].values.astype(np.float64)
+			if ignore_NaN and np.all(np.isnan(cs_values)):
+				continue
+
 			# Check again if it matches - although this has been done at the database building stage
 			if res != seq[pos]:
 				warnings.warn("Sequence mismatch for entry {} at position {} ({} - {})".format(str(eID),pos+1,res,seq[pos]))
@@ -111,11 +131,13 @@ def make_NN_arrays(EntryDB,
 			myRange = np.arange(w0,w0+SS_Window)[~SS_isOut]
 			SS_Input[:,-1] = SS_isOut.astype(float)
 			SS_Input[~SS_isOut,:NSS] = SS_arr[myRange]
+			if np.any(np.isnan(SS_Input)):
+				continue
 
 			# Get neural network input:
 			Input = np.concatenate([seq_Input.flatten(),SS_Input.flatten()])
 			X.append(Input)
-			y.append(cs[atoms].values)
+			y.append(cs_values)
 			if return_BMRBmap:
 				BMRB_map.append(eID)
 	X = np.array(X)
@@ -123,6 +145,3 @@ def make_NN_arrays(EntryDB,
 	if return_BMRBmap:
 		return X, y, BMRB_map
 	return X, y
-
-
-
