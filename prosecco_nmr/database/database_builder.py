@@ -263,10 +263,13 @@ def build_entry_database(entries,
 		polymer_type = nmrstar.get_tag("Entity.Polymer_type")[0].lower()
 		if re.search("nucleotide|polysaccharide|other|dna|cyclic",polymer_type):
 			continue
-
-		release = nmrstar['entry_information']['_Release']["Date"]
-		years = [ int(d.split("-")[0]) for d in release ]
-		release_year = min(years)
+		
+		try:
+			release = nmrstar['entry_information']['_Release']["Date"]
+			years = [ int(d.split("-")[0]) for d in release ]
+			release_year = min(years)
+		except KeyError:
+			release_year = np.nan
 
 		nCS = len(CS[0])
 		# Parse experimental conditions:
