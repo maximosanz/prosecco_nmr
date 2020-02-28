@@ -264,6 +264,10 @@ def build_entry_database(entries,
 		if re.search("nucleotide|polysaccharide|other|dna|cyclic",polymer_type):
 			continue
 
+		release = nmrstar['entry_information']['_Release']["Date"]
+		years = [ int(d.split("-")[0]) for d in release ]
+		release_year = min(years)
+
 		nCS = len(CS[0])
 		# Parse experimental conditions:
 		# Sample type and other conditions listed in experimental_conditions
@@ -307,6 +311,7 @@ def build_entry_database(entries,
 				PDB_match = (0,0,0,0)
 
 		Entry_d = {"BMRB_ID" : eID,
+			"Year" : release_year,
 			"N_CS" : nCS,
 			"Sequence" : seq,
 			"PDB_ID" : pdb,
