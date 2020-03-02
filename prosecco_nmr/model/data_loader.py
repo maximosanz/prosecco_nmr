@@ -9,6 +9,10 @@ __all__ = ['make_NN_arrays',
 	'Residue_Scaler'
 	]
 
+_Special_Residue_Key = ["Cystine","Trans","Protonated"]
+_Special_Residues = ["C","P","H"]
+_PSIPRED_SS = ["C","H","E"]
+
 def _is_outofbounds(pos,NRes,N_neigh):
 	isOut = np.zeros(N_neigh*2 + 1,dtype=bool)
 	first = pos - N_neigh
@@ -52,6 +56,45 @@ def _get_residue_scaling(X,y,seq_neigh=2,seq_Nodes=23,include_special=True,N_spe
 		cs = y[myResIDX==i]
 		scaling[i] = [np.nanmean(cs,0),np.nanstd(cs,0)]
 	return scaling, myResIDX
+
+def _extract_PSIPRED_array(entry_CS):
+	return np.array([ [ cs["PSIPRED_{}".format(ss)] for ss in _PSIPRED_SS ] 
+		for j, cs in entry_CS.iterrows() ])
+
+def _extract_specialRes_info(CS_row):
+	return np.array([ CS_row[sp].values[0] for sp in _Special_Residue_Key ],dtype=float)
+
+def _extract_specialRes_array(entry_CS):
+	return np.array([ [ cs[sp].values[0] for sp in _Special_Residue_Key ] 
+		for j, cs in entry_CS.iterrows() ],dtype=float)
+
+def _extract_sequence_array(seq,useBLOSUM=True):
+	NRes = len(RESIDUES)
+	seqLen = len(seq)
+	seqArr = np.zeros((seqLen,NRes))
+	for i, r in enumerate(seq):
+		try:
+			resIDX = RESIDUES.index(r)
+			if useBLOSUM:
+				seqArr[i] = BLOSUM62[resIDX]
+			else:
+				seqArr[i,resIDX] = 1.0
+		except ValueError:
+			seqArr[i] = np.nan
+	return seqArr
+
+def _extract_CS_array(entry_CS,atoms):
+	return np.array([ [ cs[at].values[0] for at in atoms ] 
+		for j, cs in entry_CS.iterrows() ])
+
+def _extract_window(pos,arr,N_neigh):
+	window = N_neigh*2 + 1
+	window_Input = np.zeros((window,arr.shape[1]))
+	isOut = _is_outofbounds(pos,arr.shape[0],N_neigh)
+	lIDX = max(0,pos-N_neigh)
+	rIDX = min(arr.shape[0],pos+N_neigh+1)
+	window_Input[isOut] = arr[lIDX:rIDX]
+	return window_Input
 
 class Residue_Scaler:
 	'''
@@ -151,14 +194,12 @@ def make_NN_arrays(EntryDB,
 	A BMRB map (mapping each row in the array to its BMRB ID) can be returned - helps for entry-based train/test split
 	'''
 
-	Special_Residue_Key = ["Cystine","Trans","Protonated"]
-	Special_Residue_Options = ["C","P","H"]
-	NSpecial = len(Special_Residue_Key)
+	NSpecial = len(_Special_Residue_Key)
 
 	N = len(EntryDB)
 	NRes = len(RESIDUES)
 	if SS_type == "PSIPRED":
-		SS = ["C","H","E"]
+		SS = _PSIPRED_SS
 	NSS = len(SS)
 
 	# Arrays containing the data to train/test the NN
@@ -177,8 +218,15 @@ def make_NN_arrays(EntryDB,
 
 		# Need to implement the DSSP parsing here
 		if SS_type == "PSIPRED":
-			SS_arr = np.array([ [ cs["PSIPRED_{}".format(ss)] for ss in ["C","H","E"] ] 
-				for j, cs in eCS.iterrows() ])
+			SS_arr = _extract_PSIPRED_array(eCS)
+
+		seq_Arr = _extract_sequence_array(seq,useBLOSUM=useBLOSUM)
+		cs_Arr = _extract_CS_array(eCS,atoms)
+		special_Arr = _extract_specialRes_array(eCS)
+
+		seq_special_Arr = np.concatenate([seq_Arr,special_Arr],axis=1)
+
+
 		for j,cs in eCS.iterrows():
 			pos = cs["Res_ID"]-1
 			res = cs["Residue"]
@@ -192,35 +240,13 @@ def make_NN_arrays(EntryDB,
 				warnings.warn("Sequence mismatch for entry {} at position {} ({} - {})".format(str(eID),pos+1,res,seq[pos]))
 				continue
 
-			# Encode sequence information:
-			seq_Window = seq_neigh*2 + 1
-			seq_Input = np.zeros((seq_Window,seq_Nodes))
-			seq_isOut = _is_outofbounds(pos,seqLen,seq_neigh)
-			w0 = pos-seq_neigh
-			discard = False
-			for iW in range(seq_Window):
-				if seq_isOut[iW]:
-					continue
-				w_res = seq[w0+iW]
-				try:
-					resIDX = RESIDUES.index(w_res)
-				except ValueError:
-					discard = True
-					break
-				if useBLOSUM:
-					seq_Input[iW,:NRes] = BLOSUM62[resIDX,:]
-				else:
-					seq_Input[iW,w_res] = 1.0
+			seq_Input = _extract_window(pos,seq_special_Arr,seq_neigh)
 
-				# Special residue info
-				if w_res not in Special_Residue_Options:
-					continue
-				w_cs = eCS[eCS["Res_ID"] == w0+iW + 1]
-				special = np.array([ w_cs[sp].values[0] for sp in Special_Residue_Key ],dtype=float)
-				seq_Input[iW,-NSpecial:] = special
-
-			if discard:
+			if np.any(np.isnan(seq_Input)):
 				continue
+
+
+			# THIS will become a special case of _extract_window that allows for the 1.0 on terminal residues.
 
 			# Encode secondary structure information:
 			SS_Window = SS_neigh* 2 + 1
@@ -244,3 +270,17 @@ def make_NN_arrays(EntryDB,
 	if return_BMRBmap:
 		return X, y, BMRB_map
 	return X, y
+
+
+
+def make_NLP_arrays(EntryDB,
+	CSdb,
+	atoms=["CA","CB","C","HA","H","N"],
+	useBLOSUM=True,
+	SS_type="PSIPRED",
+	seq_Nodes=23,
+	SS_Nodes=4,
+	return_BMRBmap=False,
+	ignore_NaN_above=0.5):
+
+	
