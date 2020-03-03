@@ -65,7 +65,7 @@ def _extract_specialRes_info(CS_row):
 	return np.array([ CS_row[sp].values[0] for sp in _Special_Residue_Key ],dtype=float)
 
 def _extract_specialRes_array(entry_CS):
-	return np.array([ [ cs[sp].values[0] for sp in _Special_Residue_Key ] 
+	return np.array([ [ cs[sp] for sp in _Special_Residue_Key ] 
 		for j, cs in entry_CS.iterrows() ],dtype=float)
 
 def _extract_sequence_array(seq,useBLOSUM=True):
@@ -84,16 +84,19 @@ def _extract_sequence_array(seq,useBLOSUM=True):
 	return seqArr
 
 def _extract_CS_array(entry_CS,atoms):
-	return np.array([ [ cs[at].values[0] for at in atoms ] 
+	return np.array([ [ cs[at] for at in atoms ] 
 		for j, cs in entry_CS.iterrows() ])
 
-def _extract_window(pos,arr,N_neigh):
+def _extract_window(pos,arr,N_neigh,add_termini=False):
 	window = N_neigh*2 + 1
 	window_Input = np.zeros((window,arr.shape[1]))
 	isOut = _is_outofbounds(pos,arr.shape[0],N_neigh)
 	lIDX = max(0,pos-N_neigh)
 	rIDX = min(arr.shape[0],pos+N_neigh+1)
-	window_Input[isOut] = arr[lIDX:rIDX]
+	window_Input[~isOut] = arr[lIDX:rIDX]
+	if add_termini:
+		add_isOut = np.expand_dims(isOut,-1)
+		window_Input = np.concatenate([window_Input,add_isOut.astype(float)],axis=1)
 	return window_Input
 
 class Residue_Scaler:
@@ -226,40 +229,16 @@ def make_NN_arrays(EntryDB,
 
 		seq_special_Arr = np.concatenate([seq_Arr,special_Arr],axis=1)
 
-
-		for j,cs in eCS.iterrows():
-			pos = cs["Res_ID"]-1
-			res = cs["Residue"]
-
-			cs_values = cs[atoms].values.astype(np.float64)
+		for pos in range(seqLen):
+			cs_values = cs_Arr[pos]
 			if ignore_NaN and np.all(np.isnan(cs_values)):
 				continue
-
-			# Check again if it matches - although this has been done at the database building stage
-			if res != seq[pos]:
-				warnings.warn("Sequence mismatch for entry {} at position {} ({} - {})".format(str(eID),pos+1,res,seq[pos]))
-				continue
-
 			seq_Input = _extract_window(pos,seq_special_Arr,seq_neigh)
-
 			if np.any(np.isnan(seq_Input)):
 				continue
-
-
-			# THIS will become a special case of _extract_window that allows for the 1.0 on terminal residues.
-
-			# Encode secondary structure information:
-			SS_Window = SS_neigh* 2 + 1
-			SS_Input = np.zeros((SS_Window,SS_Nodes))
-			SS_isOut = _is_outofbounds(pos,seqLen,SS_neigh)
-			w0 = pos-SS_neigh
-			myRange = np.arange(w0,w0+SS_Window)[~SS_isOut]
-			SS_Input[:,-1] = SS_isOut.astype(float)
-			SS_Input[~SS_isOut,:NSS] = SS_arr[myRange]
+			SS_Input = _extract_window(pos,SS_arr,SS_neigh,add_termini=True)
 			if np.any(np.isnan(SS_Input)):
 				continue
-
-			# Get neural network input:
 			Input = np.concatenate([seq_Input.flatten(),SS_Input.flatten()])
 			X.append(Input)
 			y.append(cs_values)
@@ -271,8 +250,6 @@ def make_NN_arrays(EntryDB,
 		return X, y, BMRB_map
 	return X, y
 
-
-
 def make_NLP_arrays(EntryDB,
 	CSdb,
 	atoms=["CA","CB","C","HA","H","N"],
@@ -282,5 +259,6 @@ def make_NLP_arrays(EntryDB,
 	SS_Nodes=4,
 	return_BMRBmap=False,
 	ignore_NaN_above=0.5):
+	return
 
 	
