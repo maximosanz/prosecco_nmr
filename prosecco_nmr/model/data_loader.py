@@ -276,7 +276,7 @@ def make_NN_arrays(EntryDB,
 			NLP_CS = np.concatenate([cs_margin,cs_Arr,cs_margin],axis=0)
 			# Right-padding of sequences shorter than NLP_segment_length:
 			if NLP_Arr.shape[0] < NLP_segment_length:
-				N_pad = NLP_segment_length-NLP_Arr.shape[0]
+				N_pad = NLP_segment_length-NLP_Arr.shape[0]+1
 				rightpad = np.tile(margin_col,(N_pad,1))
 				cs_rightpad = np.zeros((N_pad,N_Atoms))
 				cs_rightpad[:] = np.nan
