@@ -6,6 +6,7 @@ from .residue_info import RESIDUES, BLOSUM62
 
 __all__ = ['make_NN_arrays',
 	'make_PROSECCO_nn',
+	'make_test_arr',
 	'Residue_Scaler'
 	]
 
@@ -186,6 +187,7 @@ def make_NN_arrays(EntryDB,
 	seq_Nodes=23,
 	SS_Nodes=4,
 	return_BMRBmap=False,
+	return_seqIDX=False,
 	ignore_NaN=True,
 	NLP_segment_length=60,
 	NLP_segment_stride=5,
@@ -217,6 +219,8 @@ def make_NN_arrays(EntryDB,
 	y = []
 	if return_BMRBmap:
 		BMRB_map = []
+	if return_seqIDX:
+		seqIDX = []
 
 	margin_col = np.zeros(seq_Nodes+SS_Nodes)
 	margin_col[-1] = 1.0
@@ -251,10 +255,12 @@ def make_NN_arrays(EntryDB,
 				if np.any(np.isnan(SS_Input)):
 					continue
 				Input = [np.concatenate([seq_Input.flatten(),SS_Input.flatten()])]
+				seqpos = [pos]
 
 		if NN_type == "NLP":
 			Input = []
 			cs_values = []
+			seqpos = []
 			NaN_frac = np.isnan(cs_Arr).sum(0) / seqLen
 			if np.all(NaN_frac > NLP_discardNaN):
 				continue
@@ -264,6 +270,13 @@ def make_NN_arrays(EntryDB,
 			cs_margin = np.zeros((NLP_margins,N_Atoms))
 			cs_margin[:] = np.nan
 			NLP_CS = np.concatenate([cs_margin,cs_Arr,cs_margin],axis=0)
+			# Right-padding of sequences shorter than NLP_segment_length:
+			if NLP_Arr.shape[0] < NLP_segment_length:
+				N_pad = NLP_segment_length-NLP_Arr.shape[0]
+				rightpad = np.tile(margin_col,(N_pad,1))
+				cs_rightpad = np.zeros((N_pad,N_Atoms))
+				NLP_Arr = np.concatenate([NLP_Arr,rightpad],axis=0)
+				NLP_CS = np.concatenate([NLP_CS,cs_rightpad],axis=0)
 			for pos in range(0,NLP_Arr.shape[0]-NLP_segment_length,NLP_segment_stride):
 				end = pos+NLP_segment_length
 				segment_Input = NLP_Arr[pos:end]
@@ -271,14 +284,44 @@ def make_NN_arrays(EntryDB,
 					continue
 				Input.append(segment_Input)
 				cs_values.append(NLP_CS[pos:end])
+				seqpos.append(np.arange(pos,end))
 
 		X.extend(Input)
 		y.extend(cs_values)
 		if return_BMRBmap:
 			BMRB_map.extend([eID]*len(Input))
+		if return_seqIDX:
+			seqIDX.extend(pos)
+
 	X = np.array(X)
 	y = np.array(y)
+	output = [X,y]
 	if return_BMRBmap:
-		return X, y, BMRB_map
-	return X, y
+		output.append(BMRB_map)
+	#if return_seqIDX:
+	#	output.append(seqIDX)
+	return tuple(output)
+
+
+def y2test(y,BMRB_map,posIDX,BMRB_order):
+
+	for r in range(y.shape[0]):
+		y_row = y[r]
+		eID = BMRB_map[r]
+		if eID not in BMRB_order:
+			continue
+		eIDX = BMRB_order.index(BMRB_map[r])
+		PRED[eIDX,posIDX] = y_row
+
+
+def make_test_arr(EntryDB,BMRB_list,N_Atoms):
+	'''
+	This function makes an array for testing chemical shift predictions consistently
+	between different PROSECCO methods and other predictors such as SPARTA+
+	Returns an array of shape (N_Entries,max_seq_len,N_Atoms) - right zero-padded
+	'''
+	EntryDB_subset = EntryDB[np.isin(EntryDB["BMRB_ID"],BMRB_list)]
+	maxlen = max([len(seq) for seq in EntryDB_subset])
+	test_arr = np.zeros((len(BMRB_list),maxlen,N_Atoms))
+
 
