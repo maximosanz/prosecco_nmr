@@ -243,10 +243,15 @@ def make_NN_arrays(EntryDB,
 
 		seq_special_Arr = np.concatenate([seq_Arr,special_Arr],axis=1)
 
+		Input = []
+		cs_values = []
+		if return_seqIDX:
+			seqpos = []
+
 		if NN_type == "fully_connected":
 			for pos in range(seqLen):
-				cs_values = [cs_Arr[pos]]
-				if ignore_NaN and np.all(np.isnan(cs_values)):
+				pos_cs = cs_Arr[pos]
+				if ignore_NaN and np.all(np.isnan(pos_cs)):
 					continue
 				seq_Input = _extract_window(pos,seq_special_Arr,seq_neigh)
 				if np.any(np.isnan(seq_Input)):
@@ -254,13 +259,12 @@ def make_NN_arrays(EntryDB,
 				SS_Input = _extract_window(pos,SS_arr,SS_neigh,add_termini=True)
 				if np.any(np.isnan(SS_Input)):
 					continue
-				Input = [np.concatenate([seq_Input.flatten(),SS_Input.flatten()])]
-				seqpos = [pos]
+				cs_values.append(pos_cs)
+				Input.append(np.concatenate([seq_Input.flatten(),SS_Input.flatten()]))
+				if return_seqIDX:
+					seqpos.append(np.array(pos))
 
 		if NN_type == "NLP":
-			Input = []
-			cs_values = []
-			seqpos = []
 			NaN_frac = np.isnan(cs_Arr).sum(0) / seqLen
 			if np.all(NaN_frac > NLP_discardNaN):
 				continue
@@ -285,44 +289,61 @@ def make_NN_arrays(EntryDB,
 					continue
 				Input.append(segment_Input)
 				cs_values.append(NLP_CS[pos:end])
-				seqpos.append(np.arange(pos,end))
+				if return_seqIDX:
+					row_seqpos = np.arange(pos-NLP_margins,end-NLP_margins,dtype=np.float64)
+					row_seqpos[(row_seqpos < 0) | (row_seqpos >= seqLen)] = np.nan
+					seqpos.append(row_seqpos)
 
 		X.extend(Input)
 		y.extend(cs_values)
 		if return_BMRBmap:
 			BMRB_map.extend([eID]*len(Input))
 		if return_seqIDX:
-			seqIDX.extend(pos)
+			seqIDX.extend(seqpos)
 
 	X = np.array(X)
 	y = np.array(y)
 	output = [X,y]
 	if return_BMRBmap:
 		output.append(BMRB_map)
-	#if return_seqIDX:
-	#	output.append(seqIDX)
+	if return_seqIDX:
+		output.append(seqIDX)
 	return tuple(output)
 
 
-def y2test(y,BMRB_map,posIDX,BMRB_order):
-
-	for r in range(y.shape[0]):
-		y_row = y[r]
-		eID = BMRB_map[r]
-		if eID not in BMRB_order:
-			continue
-		eIDX = BMRB_order.index(BMRB_map[r])
-		PRED[eIDX,posIDX] = y_row
-
-
-def make_test_arr(EntryDB,BMRB_list,N_Atoms):
+def make_test_arr(y,BMRB_map,seqIDX,BMRB_list,maxlen,average_multiple=True):
 	'''
 	This function makes an array for testing chemical shift predictions consistently
 	between different PROSECCO methods and other predictors such as SPARTA+
 	Returns an array of shape (N_Entries,max_seq_len,N_Atoms) - right zero-padded
 	'''
-	EntryDB_subset = EntryDB[np.isin(EntryDB["BMRB_ID"],BMRB_list)]
-	maxlen = max([len(seq) for seq in EntryDB_subset])
-	test_arr = np.zeros((len(BMRB_list),maxlen,N_Atoms))
+	test_arr = np.zeros((len(BMRB_list),maxlen,y.shape[-1]))
+	test_ct = np.zeros(test_arr.shape)
+	for r in range(y.shape[0]):
+		y_row = y[r]
+		eID = BMRB_map[r]
+		if eID not in BMRB_list:
+			continue
+		row_pos = seqIDX[r]
+		row_isNan = np.isnan(row_pos)
+		if np.any(row_isNan):
+			row_pos = row_pos[~row_isNan]
+			y_row = y_row[~row_isNan]
+		eIDX = BMRB_list.index(BMRB_map[r])
 
+		cs_isNan = np.isnan(y_row)
+		row_pos = row_pos.astype(int)
 
+		this_arr = test_arr[eIDX,row_pos]
+		this_ct = test_ct[eIDX,row_pos]
+
+		if not average_multiple:
+			this_arr[~cs_isNan] = 0.0
+			this_ct[~cs_isNan] = 0
+		this_arr[~cs_isNan] += y_row[~cs_isNan]
+		this_ct[~cs_isNan] += 1
+
+		test_ct[eIDX,row_pos] = this_ct
+		test_arr[eIDX,row_pos] = this_arr
+	test_arr /= test_ct
+	return test_arr
