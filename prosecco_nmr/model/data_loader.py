@@ -8,7 +8,8 @@ from .residue_info import RESIDUES, BLOSUM62
 __all__ = ['make_NN_arrays',
 	'make_PROSECCO_nn',
 	'make_test_arr',
-	'Residue_Scaler'
+	'Residue_Scaler',
+	'load_scaler'
 	]
 
 _Special_Residue_Key = ["Cystine","Trans","Protonated"]
@@ -56,8 +57,6 @@ def _get_residue_scaling(X,y,seq_neigh=2,seq_Nodes=23,include_special=True,N_spe
 	scaling = np.zeros((resRange,2,y.shape[-1]))
 	for i in range(resRange):
 		cs = y[myResIDX==i]
-		if not len(cs):
-			continue
 		scaling[i] = [np.nanmean(cs,0),np.nanstd(cs,0)]
 	return scaling, myResIDX
 
@@ -167,7 +166,7 @@ class Residue_Scaler:
 		y_new = self._transform_wrapper(X,y,self._inverse_scale)
 		return y_new
 
-	def save(fn):
+	def save(self,fn):
 		with open(fn, 'wb') as handle:
 			pickle.dump(self, handle, protocol=pickle.HIGHEST_PROTOCOL)
 		return self
