@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 import warnings
+import pickle
 from .residue_info import RESIDUES, BLOSUM62
 
 __all__ = ['make_NN_arrays',
@@ -55,6 +56,8 @@ def _get_residue_scaling(X,y,seq_neigh=2,seq_Nodes=23,include_special=True,N_spe
 	scaling = np.zeros((resRange,2,y.shape[-1]))
 	for i in range(resRange):
 		cs = y[myResIDX==i]
+		if not len(cs):
+			continue
 		scaling[i] = [np.nanmean(cs,0),np.nanstd(cs,0)]
 	return scaling, myResIDX
 
@@ -163,6 +166,16 @@ class Residue_Scaler:
 	def inverse_transform(self,X,y):
 		y_new = self._transform_wrapper(X,y,self._inverse_scale)
 		return y_new
+
+	def save(fn):
+		with open(fn, 'wb') as handle:
+			pickle.dump(self, handle, protocol=pickle.HIGHEST_PROTOCOL)
+		return self
+
+def load_scaler(fn):
+	with open(fn, 'rb') as handle:
+		b = pickle.load(handle)
+	return b
 
 def make_PROSECCO_nn(N_Atoms=1,
 	N_Inputs=143,
