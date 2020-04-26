@@ -109,8 +109,7 @@ def _extract_window(pos,arr,N_neigh,add_termini=False):
 	return window_Input
 
 def _PSIPRED_fromseq(seq,basename,psipred_exe='psipred'):
-	seqfn = "{}.fasta".format(basename)
-	PSIPRED_seq(seq,seqfn,psipred_exe=psipred_exe)
+	PSIPRED_seq(seq,basename,psipred_exe=psipred_exe)
 	ss2fn = Path("{}.ss2".format(basename))
 	if not ss2fn.is_file():
 		raise ValueError("Error running PSIPRED: Output file {} cannot be found".format(ss2fn))
@@ -122,7 +121,7 @@ def _PSIPRED_fromseq(seq,basename,psipred_exe='psipred'):
 
 def _specialRes_fromseq(seq):
 	seqArr = np.array(list(seq))
-	return np.array([ seqArr == ch for ch in _Special_Residue_chars ],dtype=float)
+	return np.array([ seqArr == ch for ch in _Special_Residue_chars ],dtype=float).T
 
 def input_fromseq(seq,
 	basename="prosecco_job",
@@ -148,7 +147,7 @@ def input_fromseq(seq,
 	seq_Arr = _extract_sequence_array(seq_raw,useBLOSUM=useBLOSUM)
 	special_Arr = _specialRes_fromseq(seq)
 	# DSSP needs to be implemented
-	SS_arr = _PSIPRED_fromseq(seq,basename,psipred_exe=psipred_exe)
+	SS_arr = _PSIPRED_fromseq(seq_raw,basename,psipred_exe=psipred_exe)
 	seq_special_Arr = np.concatenate([seq_Arr,special_Arr],axis=1)
 
 	Input = []
