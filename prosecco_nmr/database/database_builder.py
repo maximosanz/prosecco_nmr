@@ -26,7 +26,9 @@ __all__ = ['get_BMRB_entries',
 	'cluster_sequences',
 	'build_CS_database',
 	'include_PSIPRED',
+	'PSIPRED_seq',
 	'run_PSIPRED',
+	'parse_ss2',
 	'remove_outliers',
 	'cluster_cystines',
 	'cluster_transPRO',
@@ -594,7 +596,7 @@ def include_PSIPRED(CS_db,
 		Entry_IDX = (CS_db["BMRB_ID"] == eID)
 		Entry_CS = CS_db[Entry_IDX]
 		ss2f = open(str(fn))
-		psipred_seq, psipred_arr = _parse_ss2(ss2f)
+		psipred_seq, psipred_arr = parse_ss2(ss2f)
 		ss2f.close()
 		seq = "".join(Entry_CS["Residue"].values)
 		if seq != psipred_seq:
@@ -608,17 +610,24 @@ def include_PSIPRED(CS_db,
 		CS_db = CS_db.reset_index(drop=True)
 	return CS_db
 
-def _parse_ss2(ss2f):
+def parse_ss2(ss2f):
 	ls = ss2f.readlines()
 	psipred_arr = np.array([l.split()[3:] for l in ls[2:]])
 	seq = "".join([l.split()[1] for l in ls[2:]])
 	return seq,psipred_arr
 
+def PSIPRED_seq(seq,fn,psipred_exe="psipred"):
+	# This requires an installation of blast, PSIPRED, and the uniref90filt database 
+	o = open(fn,'w')
+	_dump_seq(o,seq,eID)
+	o.close()
+	subprocess.run([psipred_exe, seqfn])
+	return
+
 def run_PSIPRED(EntryDB,directory="./PSIPRED",prefix="",suffix=".ss2",psipred_exe="psipred",skipf=None):
 	skip_entries = []
 	if skipf is not None:
 		skip_entries = set([ l.strip() for l in open(skipf) ])
-	# This requires an installation of blast, PSIPRED, and the uniref90filt database 
 	d = Path(directory)
 	d.mkdir(parents=True, exist_ok=True)
 	cwd = os.getcwd()
@@ -632,10 +641,7 @@ def run_PSIPRED(EntryDB,directory="./PSIPRED",prefix="",suffix=".ss2",psipred_ex
 		if check_fn.is_file():
 			continue
 		seqfn = prefix+'{}.fasta'.format(str(eID))
-		o = open(seqfn,'w')
-		_dump_seq(o,seq,eID)
-		o.close()
-		subprocess.run([psipred_exe, seqfn])
+		PSIPRED_seq(seq,seqfn,psipred_exe=psipred_exe)
 	os.chdir(cwd)
 	return
 

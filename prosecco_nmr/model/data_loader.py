@@ -3,9 +3,14 @@ import pandas as pd
 import tensorflow as tf
 import warnings
 import pickle
-from .residue_info import RESIDUES, BLOSUM62
 
-__all__ = ['make_NN_arrays',
+from .residue_info import RESIDUES, BLOSUM62
+from ..database import PSIPRED_seq, parse_ss2
+
+from pathlib import Path
+
+__all__ = ['input_fromseq',
+	'make_NN_arrays',
 	'make_PROSECCO_nn',
 	'make_test_arr',
 	'Residue_Scaler',
@@ -14,6 +19,7 @@ __all__ = ['make_NN_arrays',
 
 _Special_Residue_Key = ["Cystine","Trans","Protonated"]
 _Special_Residues = ["C","P","H"]
+_Special_Residue_chars = ["X","O","Z"]
 _PSIPRED_SS = ["C","H","E"]
 
 def _is_outofbounds(pos,NRes,N_neigh):
@@ -101,6 +107,59 @@ def _extract_window(pos,arr,N_neigh,add_termini=False):
 		add_isOut = np.expand_dims(isOut,-1)
 		window_Input = np.concatenate([window_Input,add_isOut.astype(float)],axis=1)
 	return window_Input
+
+def _PSIPRED_fromseq(seq,basename,psipred_exe='psipred'):
+	seqfn = "{}.fasta".format(basename)
+	PSIPRED_seq(seq,seqfn,psipred_exe=psipred_exe)
+	ss2fn = Path("{}.ss2".format(basename))
+	if not ss2fn.is_file():
+		raise ValueError("Error running PSIPRED: Output file {} cannot be found".format(ss2fn))
+	ss2f = open(ss2fn)
+	psipred_seq, psipred_arr = parse_ss2(ss2f)
+	if seq != psipred_seq:
+		raise ValueError("Error running PSIPRED: Input sequence different to output in file {}".format(ss2fn))
+	return psipred_arr
+
+def _specialRes_fromseq(seq):
+	seqArr = np.array(list(seq))
+	return np.array([ seqArr == ch for ch in _Special_Residue_chars ],dtype=float)
+
+def input_fromseq(seq,
+	basename="prosecco_job",
+	NN_type="fully_connected",
+	useBLOSUM=True,
+	seq_neigh=2,
+	SS_neigh=3,
+	SS_type="PSIPRED",
+	seq_Nodes=23,
+	SS_Nodes=4,
+	NLP_segment_length=60,
+	NLP_segment_stride=5,
+	NLP_margins=20,
+	psipred_exe='psipred'):
+	# NLP parsing not yet implemented here
+
+	# Replace special res with standard AAs
+	seq_raw = seq
+	for i, ch in enumerate(_Special_Residue_chars):
+		std = _Special_Residues[i]
+		seq_raw = seq_raw.replace(ch,std)
+
+	seq_Arr = _extract_sequence_array(seq_raw,useBLOSUM=useBLOSUM)
+	special_Arr = _specialRes_fromseq(seq)
+	# DSSP needs to be implemented
+	SS_arr = _PSIPRED_fromseq(seq,basename,psipred_exe=psipred_exe)
+	seq_special_Arr = np.concatenate([seq_Arr,special_Arr],axis=1)
+
+	Input = []
+	for pos in range(len(seq)):
+		seq_Input = _extract_window(pos,seq_special_Arr,seq_neigh)
+		SS_Input = _extract_window(pos,SS_arr,SS_neigh,add_termini=True)
+		Input.append(np.concatenate([seq_Input.flatten(),SS_Input.flatten()]))
+
+	return np.array(Input)
+
+
 
 class Residue_Scaler:
 	'''
