@@ -616,10 +616,11 @@ def parse_ss2(ss2f):
 	seq = "".join([l.split()[1] for l in ls[2:]])
 	return seq,psipred_arr
 
-def PSIPRED_seq(seq,fn,psipred_exe="psipred"):
+def PSIPRED_seq(seq,fn,psipred_exe="psipred",seqsuf=".fasta"):
 	# This requires an installation of blast, PSIPRED, and the uniref90filt database 
-	o = open(fn,'w')
-	_dump_seq(o,seq,eID)
+	seqfn = "{}{}".format(fn,seqsuf)
+	o = open(seqfn,'w')
+	_dump_seq(o,seq,fn)
 	o.close()
 	subprocess.run([psipred_exe, seqfn])
 	return
@@ -640,7 +641,7 @@ def run_PSIPRED(EntryDB,directory="./PSIPRED",prefix="",suffix=".ss2",psipred_ex
 		check_fn = Path(prefix+str(eID)+suffix)
 		if check_fn.is_file():
 			continue
-		seqfn = prefix+'{}.fasta'.format(str(eID))
+		seqfn = prefix+str(eID)
 		PSIPRED_seq(seq,seqfn,psipred_exe=psipred_exe)
 	os.chdir(cwd)
 	return
