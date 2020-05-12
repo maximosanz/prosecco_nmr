@@ -1,0 +1,31 @@
+#!/usr/bin/env python
+
+import prosecco_nmr
+import argparse
+
+argparser = argparse.ArgumentParser(description='Sequence-based chemical shift prediction: PROtein SEquence and Chemical shift COrrelations')
+
+argparser.add_argument('-seq',metavar='fasta',help='Protein sequence input file (FASTA format)',required=True)
+argparser.add_argument('-out',metavar='PROSECCO_output',help='Chemical shift prediction of backbone atoms',required=True)
+argparser.add_argument('-PSIPRED_file',metavar='PSIPRED.ss2',help='(Optional) PSIPRED output file (.ss2 format)',required=False,default=None)
+argparser.add_argument('-job_name',metavar='prosecco_job',help='(Optional) Job name that will be used for intermediate files (e.g. PSIPRED output if none provided)',required=False,default='prosecco_job')
+argparser.add_argument('-psipred_exe',metavar='psipred',help='(Optional) Location of the PSIPRED executable',required=False,default='psipred')
+args = argparser.parse_args()
+
+print("PROSECCO is running!")
+
+atoms = prosecco_nmr.model.BACKBONE_ATOMS
+
+Seqs = prosecco_nmr.model.parse_fasta(args.seq)
+seq = Seqs[0][1] # Predict the first sequence from the fasta file
+
+ss2f = None
+if args.PSIPRED_file is not None:
+	ss2f = open(args.PSIPRED_file)
+
+CS, SS = prosecco_nmr.run(seq,atoms,
+	job_name=args.job_name,
+	ss2_file=ss2f,
+	return_SS=True)
+
+prosecco_nmr.save(seq,CS,SS,ofn=args.out)

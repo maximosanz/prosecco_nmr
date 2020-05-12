@@ -1,1 +1,2 @@
 include prosecco_nmr/database/*.tbl
+recursive-include prosecco_nmr/model/weights/ *
