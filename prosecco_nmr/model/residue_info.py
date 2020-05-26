@@ -1,8 +1,11 @@
 import numpy as np
+from ..database import atom_names
 
-__all__ = ['RESIDUES','BLOSUM62',"BACKBONE_ATOMS"]
+__all__ = ['RESIDUES','BLOSUM62',"BACKBONE_ATOMS","ALL_ATOMS"]
 
 BACKBONE_ATOMS = [ "CA", "CB", "C", "H", "HA", "N"]
+
+ALL_ATOMS = sorted(atom_names)
 
 RESIDUES = ["A","R","N","D","C","Q","E","G","H","I","L","K","M","F","P","S","T","W","Y","V"]
 

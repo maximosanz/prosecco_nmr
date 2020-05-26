@@ -1,7 +1,6 @@
 MANIFEST.in
 README.md
 setup.py
-bin/prosecco
 prosecco_nmr/__init__.py
 prosecco_nmr/run.py
 prosecco_nmr.egg-info/PKG-INFO
@@ -82,7 +81,6 @@ prosecco_nmr/model/weights/SLP_base/PROSECCO_scaler_NE
 prosecco_nmr/model/weights/SLP_base/PROSECCO_scaler_NE1
 prosecco_nmr/model/weights/SLP_base/PROSECCO_scaler_NE2
 prosecco_nmr/model/weights/SLP_base/PROSECCO_scaler_NH1
-prosecco_nmr/model/weights/SLP_base/PROSECCO_scaler_NH2
 prosecco_nmr/model/weights/SLP_base/PROSECCO_weights_C.data-00000-of-00002
 prosecco_nmr/model/weights/SLP_base/PROSECCO_weights_C.data-00001-of-00002
 prosecco_nmr/model/weights/SLP_base/PROSECCO_weights_C.index
@@ -284,8 +282,5 @@ prosecco_nmr/model/weights/SLP_base/PROSECCO_weights_NE2.index
 prosecco_nmr/model/weights/SLP_base/PROSECCO_weights_NH1.data-00000-of-00002
 prosecco_nmr/model/weights/SLP_base/PROSECCO_weights_NH1.data-00001-of-00002
 prosecco_nmr/model/weights/SLP_base/PROSECCO_weights_NH1.index
-prosecco_nmr/model/weights/SLP_base/PROSECCO_weights_NH2.data-00000-of-00002
-prosecco_nmr/model/weights/SLP_base/PROSECCO_weights_NH2.data-00001-of-00002
-prosecco_nmr/model/weights/SLP_base/PROSECCO_weights_NH2.index
 prosecco_nmr/utils/__init__.py
 prosecco_nmr/utils/utils.py
