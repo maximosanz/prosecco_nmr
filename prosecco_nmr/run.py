@@ -23,7 +23,6 @@ def _predict_singleNet(Input,atoms,**kwargs):
 			CS = Res_Scaler.inverse_transform(Input,CS)
 	return CS
 
-
 def run(seq,atoms,**kwargs):
 
 	default_kwargs={ 

@@ -36,7 +36,9 @@ __all__ = ['get_BMRB_entries',
 	'check_referencing',
 	'keep_entries',
 	'atom_names',
-	'pick_cluster_centers'
+	'pick_cluster_centers',
+	'RESIDUE_SIDECHAIN_GROUPS',
+	'RESIDUE_IGNORE_ATOMS'
 	]
 
 __MY_APPLICATION__ = "PROSECCO-NMR"
@@ -133,6 +135,83 @@ def _parse_nomenclature_table(fn="atom_nom.tbl"):
 		pdb = c[4]
 		d[res][bmrb] = pdb
 	return d
+
+def _get_residue_atoms(fn="atom_nom.tbl"):
+	d = _parse_nomenclature_table(fn)
+	d2 = { k : [ k2 for k2, v2 in v.items() ] for k,v in d.items() }
+	return d2
+
+RESIDUE_SIDECHAIN_GROUPS = {
+	"A" : {"HB" : ["HB1", "HB2", "HB3"]},
+	"C" : {"HB-23" : ["HB2", "HB3"]},
+	"D" : {"HB-23" : ["HB2", "HB3"]},
+	"E" : {"HB-23" : ["HB2", "HB3"],
+		"HG-23" : ["HG2", "HG3"]},
+	"F" : {"HB-23" : ["HB2", "HB3"],
+		"CD-12" : ["CD1", "CD2"],
+		"HD-12" : ["HD1", "HD2"],
+		"CE-12" : ["CE1", "CE2"],
+		"HE-12" : ["HE1", "HE2"]},
+	"G" : {"HA-23" : ["HA2", "HA3"]},
+	"H" : {"HB-23" : ["HB2", "HB3"]},
+	"I" : {"HG1-23" : ["HG12", "HG13"],
+		"HG2" : ["HG21", "HG22", "HG23"],
+		"HD1" : ["HD11", "HD12", "HD13"]},
+	"K" : {"HB-23" : ["HB2", "HB3"],
+		"HG-23" : ["HG2", "HG3"],
+		"HD-23" : ["HD2", "HD3"],
+		"HE-23" : ["HE2", "HE3"]},
+	"L" : {"HB-23" : ["HB2", "HB3"],
+		"HD1" : ["HD11", "HD12", "HD13"],
+		"HD2" : ["HD21", "HD22", "HD23"]},
+	"M" : {"HB-23" : ["HB2", "HB3"],
+		"HG-23" : ["HG2", "HG3"],
+		"HE" : ["HE1", "HE2", "HE3"]},
+	"N" : {"HB-23" : ["HB2", "HB3"],
+		"HD2-12" : ["HD21", "HD22"]},
+	"P" : {"HB-23" : ["HB2", "HB3"],
+		"HG-23" : ["HG2", "HG3"],
+		"HD-23" : ["HD2", "HD3"]},
+	"Q" : {"HB-23" : ["HB2", "HB3"],
+		"HG-23" : ["HG2", "HG3"],
+		"HE2-12" : ["HE21", "HE22"]},
+	"R" : {"HB-23" : ["HB2", "HB3"],
+		"HG-23" : ["HG2", "HG3"],
+		"HD-23" : ["HD2", "HD3"]},
+	"S" : {"HB-23" : ["HB2", "HB3"]},
+	"T" : {"HG2" : ["HG21", "HG22", "HG23"]},
+	"V" : {"HG1" : ["HG11", "HG12", "HG13"],
+		"HG2" : ["HG21", "HG22", "HG23"]},
+	"W" : {"HB-23" : ["HB2", "HB3"]},
+	"Y" : {"HB-23" : ["HB2", "HB3"],
+		"CD-12" : ["CD1", "CD2"],
+		"HD-12" : ["HD1", "HD2"],
+		"CE-12" : ["CE1", "CE2"],
+		"HE-12" : ["HE1", "HE2"]}
+}
+
+RESIDUE_IGNORE_ATOMS = {
+	"A" : ["O"],
+	"C" : ["O", "SG"],
+	"D" : ["O", "CG", "OD1", "OD2", "HD2"],
+	"E" : ["O", "CD", "OE1", "OE2", "HE2"],
+	"F" : ["O", "CG"],
+	"G" : ["O"],
+	"H" : ["O", "HD1", "HE2", "CG", "CD2", "ND1", "NE2"],
+	"I" : ["O"],
+	"K" : ["O", "HZ1", "HZ2", "HZ3", "NZ"],
+	"L" : ["O"],
+	"M" : ["O"],
+	"N" : ["O", "OD1"],
+	"P" : ["O", "H2", "H3"],
+	"Q" : ["O", "OE1"],
+	"R" : ["O", "HH11", "HH12", "HH21", "HH22", "CZ", "NE", "NH1", "NH2"],
+	"S" : ["O", "HG", "OG"],
+	"T" : ["O", "OG1"],
+	"V" : ["O"],
+	"W" : ["O", "CG", "CD2", "CE2"],
+	"Y" : ["O", "HH", "CG", "CZ", "OH"]
+}
 
 def _get_all_atnames(fn="atom_nom.tbl"):
 	d = _parse_nomenclature_table(fn)
@@ -472,7 +551,9 @@ def build_CS_database(EntryDB,
 	NMRSTAR_prefix="",
 	NMRSTAR_suffix=".str",
 	tolerance=0.01,
-	return_discarded=False):
+	return_discarded=False,
+	sidechain_groups=RESIDUE_SIDECHAIN_GROUPS,
+	atom_ignore=RESIDUE_IGNORE_ATOMS):
 
 	if local_files:
 		_check_local_dir(NMRSTAR_directory)
@@ -543,6 +624,9 @@ def build_CS_database(EntryDB,
 			if res_1let not in atom_nom or at not in atom_nom[res_1let]:
 				# Atoms not in the standard nomenclature
 				continue
+			if atom_ignore is not None and at in atom_ignore[res_1let]:
+				# Ignore specified atoms (not normally observed by NMR)
+				continue
 			try:
 				cs_val = float(x[5])
 			except ValueError:
@@ -562,9 +646,29 @@ def build_CS_database(EntryDB,
 
 		if discard:
 			continue
+
 		CS_db.extend(Entry_CS)
 
 	CS_db = pd.DataFrame(CS_db)
+
+
+	# Group quasi-equivalent sidechain atoms
+	for res, groups in sidechain_groups.items():
+		Res_Idx = ( CS["Residue"] == res )
+		for group, atoms in groups.items():
+			at_err = [ "{}_Err".format(at) for at in atoms ]
+			group_CS = np.nanmean(CS[Res_Idx][atoms],1)
+			group_err = np.nanmean(CS[Res_Idx][at_err],1)
+			CS.loc[Res_Idx,group] = group_CS
+			CS.loc[Res_Idx,group+"_Err"] = group_err
+
+			# Remove individual CS
+			CS.loc[Res_Idx,atoms] = np.nan
+			CS.loc[Res_Idx,at_err] = np.nan
+		
+	# Remove columns with all NaNs
+	drop = [ col for col in CS.columns if np.all(np.isnan(CS[col])) ]
+	CS = CS.drop(columns=drop)
 
 	if return_discarded:
 		return CS_db,discarded
