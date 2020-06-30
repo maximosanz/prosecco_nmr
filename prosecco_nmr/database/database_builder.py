@@ -654,21 +654,21 @@ def build_CS_database(EntryDB,
 
 	# Group quasi-equivalent sidechain atoms
 	for res, groups in sidechain_groups.items():
-		Res_Idx = ( CS["Residue"] == res )
+		Res_Idx = ( CS_db["Residue"] == res )
 		for group, atoms in groups.items():
 			at_err = [ "{}_Err".format(at) for at in atoms ]
-			group_CS = np.nanmean(CS[Res_Idx][atoms],1)
-			group_err = np.nanmean(CS[Res_Idx][at_err],1)
-			CS.loc[Res_Idx,group] = group_CS
-			CS.loc[Res_Idx,group+"_Err"] = group_err
+			group_CS = np.nanmean(CS_db[Res_Idx][atoms],1)
+			group_err = np.nanmean(CS_db[Res_Idx][at_err],1)
+			CS_db.loc[Res_Idx,group] = group_CS
+			CS_db.loc[Res_Idx,group+"_Err"] = group_err
 
 			# Remove individual CS
-			CS.loc[Res_Idx,atoms] = np.nan
-			CS.loc[Res_Idx,at_err] = np.nan
+			CS_db.loc[Res_Idx,atoms] = np.nan
+			CS_db.loc[Res_Idx,at_err] = np.nan
 		
 	# Remove columns with all NaNs
-	drop = [ col for col in CS.columns if np.all(np.isnan(CS[col])) ]
-	CS = CS.drop(columns=drop)
+	drop = [ col for col in CS_db.columns if np.all(np.isnan(CS_db[col])) ]
+	CS_db = CS_db.drop(columns=drop)
 
 	if return_discarded:
 		return CS_db,discarded
