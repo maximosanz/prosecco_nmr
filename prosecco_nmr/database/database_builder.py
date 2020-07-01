@@ -197,7 +197,7 @@ RESIDUE_IGNORE_ATOMS = {
 	"E" : ["O", "CD", "OE1", "OE2", "HE2"],
 	"F" : ["O", "CG"],
 	"G" : ["O"],
-	"H" : ["O", "HD1", "HE2", "CG", "CD2", "ND1", "NE2"],
+	"H" : ["O", "HD1", "HE2", "CG", "ND1", "NE2"],
 	"I" : ["O"],
 	"K" : ["O", "HZ1", "HZ2", "HZ3", "NZ"],
 	"L" : ["O"],
