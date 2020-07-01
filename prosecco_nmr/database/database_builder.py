@@ -222,6 +222,23 @@ def _get_all_atnames(fn="atom_nom.tbl"):
 
 atom_names = _get_all_atnames()
 
+def _get_PROSECCO_atnames():
+	d = _parse_nomenclature_table()
+	PROSECCO_d = {}
+	for res,atomd in d.items():
+		grouped_ats = []
+		grouped_atnames = []
+		for k,v in RESIDUE_SIDECHAIN_GROUPS[res].items():
+			grouped_ats.extend(v)
+			grouped_ats.append(k)
+		PROSECCO_d[res] = []
+		for atom in atomd:
+			if atom in RESIDUE_IGNORE_ATOMS[res] or atom in grouped_ats:
+				continue
+			PROSECCO_d[res].append(atom)
+	return PROSECCO_d
+
+
 def _dump_seq(f,seq,seqID,n=60):
 	f.write(">{}\n".format(seqID))
 	splitseq = [ seq[i:i+n] for i in range(0,len(seq),n) ]
@@ -791,7 +808,7 @@ def check_referencing(CS_db,EntryDB,removesigma=1.5,atoms=["CA","CB","C","H","HA
 	return CS_db
 
 def remove_outliers(CS_db,contamination=0.01):
-	atom_nom = _parse_nomenclature_table()
+	atom_nom = _get_PROSECCO_atnames()
 	for i,res in enumerate(atom_nom):
 		print("\r  >> Removing outliers for residue {} ({} / {})     ".format(res,i+1,len(atom_nom)), end='')
 		res_IDX = CS_db['Residue'] == res
