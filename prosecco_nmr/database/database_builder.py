@@ -667,7 +667,7 @@ def build_CS_database(EntryDB,
 			CS_db.loc[Res_Idx,at_err] = np.nan
 		
 	# Remove columns with all NaNs
-	drop = [ col for col in CS_db.columns if np.all(np.isnan(CS_db[col])) ]
+	drop = [ col for col in CS_db.columns if CS_db.dtypes[col] == float and np.all(np.isnan(CS_db[col])) ]
 	CS_db = CS_db.drop(columns=drop)
 
 	if return_discarded:
