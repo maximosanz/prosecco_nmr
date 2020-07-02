@@ -17,7 +17,8 @@ from sklearn.cluster import AgglomerativeClustering
 from Bio.SeqUtils import IUPACData
 from pathlib import Path
 
-__all__ = ['get_BMRB_entries',
+__all__ = ['get_atname_list',
+	'get_BMRB_entries',
 	'get_NMRSTAR_files',
 	'get_PDB_files',
 	'get_all_PDB_files',
