@@ -363,7 +363,7 @@ def build_entry_database(entries,
 			continue
 		
 		try:
-			release = nmrstar['entry_information']['_Release']["Date"]
+			release = nmrstar.get_tag("Release.Date")
 			years = [ int(d.split("-")[0]) for d in release ]
 			release_year = min(years)
 		except KeyError:
