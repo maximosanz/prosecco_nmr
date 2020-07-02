@@ -241,7 +241,7 @@ def _get_PROSECCO_atnames():
 
 def get_atname_list():
 	atname_d = _get_PROSECCO_atnames()
-	list(set([ at for res, ats in atname_d.items() for at in ats ]))
+	return list(set([ at for res, ats in atname_d.items() for at in ats ]))
 
 
 def _dump_seq(f,seq,seqID,n=60):
