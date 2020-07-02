@@ -238,6 +238,10 @@ def _get_PROSECCO_atnames():
 			PROSECCO_d[res].append(atom)
 	return PROSECCO_d
 
+def get_atname_list():
+	atname_d = _get_PROSECCO_atnames()
+	list(set([ at for res, ats in atname_d for at in ats ]))
+
 
 def _dump_seq(f,seq,seqID,n=60):
 	f.write(">{}\n".format(seqID))
@@ -363,7 +367,7 @@ def build_entry_database(entries,
 			continue
 		
 		try:
-			release = nmrstar['entry_information']['_Release']["Date"]
+			release = nmrstar.get_tag("Release.Date")
 			years = [ int(d.split("-")[0]) for d in release ]
 			release_year = min(years)
 		except KeyError:
