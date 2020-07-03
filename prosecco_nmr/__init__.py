@@ -1,2 +1,2 @@
-from . import database, model
+from . import database, model, benchmark
 from .run import *
