@@ -231,12 +231,13 @@ def _get_PROSECCO_atnames():
 		grouped_atnames = []
 		for k,v in RESIDUE_SIDECHAIN_GROUPS[res].items():
 			grouped_ats.extend(v)
-			grouped_ats.append(k)
+			grouped_atnames.append(k)
 		PROSECCO_d[res] = []
 		for atom in atomd:
 			if atom in RESIDUE_IGNORE_ATOMS[res] or atom in grouped_ats:
 				continue
 			PROSECCO_d[res].append(atom)
+		PROSECCO_d[res].extend(grouped_atnames)
 	return PROSECCO_d
 
 def get_atname_list():

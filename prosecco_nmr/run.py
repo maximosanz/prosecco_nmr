@@ -12,7 +12,17 @@ _PSIPRED_SS = ["C","H","E"]
 
 
 def _predict_singleNet(Input,atoms,**kwargs):
-	Net = _load_NN(kwargs['model_name'],atoms)
+
+	default_kwargs={ 
+	'Net' : None
+	}
+
+	kw = eval_kwargs(kwargs,default_kwargs)
+	if kw['Net'] is not None:
+		Net = kw['Net']
+	else:
+		Net = _load_NN(kwargs['model_name'],atoms)
+
 	if Net is None:
 		CS = np.zeros((Input.shape[0],1))
 		CS[:] = np.nan
@@ -32,7 +42,8 @@ def run(seq,atoms,**kwargs):
 	'scaler_fnpref' : "PROSECCO_scaler",
 	'return_SS': False,
 	'singleAtom_Nets' : True,
-	'print_progress' : True
+	'print_progress' : True,
+	'Net' : None
 	}
 	kw = eval_kwargs(kwargs,default_kwargs)
 
