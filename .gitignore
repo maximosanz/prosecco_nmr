@@ -1,4 +1,4 @@
 build
 prosecco_nmr.egg-info
-prosecco_nmr/__pycache__
+**/__pycache__/
 Test
