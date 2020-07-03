@@ -5,13 +5,7 @@ from ..model import make_test_arr
 
 from pathlib import Path
 
-__all__ = ['input_fromseq',
-	'parse_fasta',
-	'make_NN_arrays',
-	'make_PROSECCO_nn',
-	'make_test_arr',
-	'Residue_Scaler',
-	'load_scaler'
+__all__ = ['run_spartaplus'
 	]
 
 
