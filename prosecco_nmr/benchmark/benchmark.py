@@ -22,8 +22,12 @@ def run_spartaplus(pdbid,
 	outd = Path(SPARTA_directory)
 	outd.mkdir(parents=True, exist_ok=True)
 
-	infn = Path(d / (PDB_prefix+pdbid+PDB_suffix))
-	outfn = Path(d / (spartaplus_prefix+pdbid+spartaplus_suffix))
+	infn = Path(ind / (PDB_prefix+pdbid+PDB_suffix))
+	outfn = Path(outd / (spartaplus_prefix+pdbid+spartaplus_suffix))
+
+	if not infn.is_file():
+		warnings.warn("Missing file: {}".format(str(infn)))
+		return 
 
 	subprocess.run([spartaplus_exe,
 		"-in", str(infn),
