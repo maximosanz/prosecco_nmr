@@ -6,6 +6,7 @@ from .database import PSIPRED_seq, parse_ss2
 from .utils import eval_kwargs
 
 __all__ = ['run',
+	'run_batch',
 	'save']
 
 _PSIPRED_SS = ["C","H","E"]
@@ -51,6 +52,60 @@ def run(seq,atoms,**kwargs):
 	if kw['return_SS']:
 		Input, SS = Input
 
+	CS = _predict_CS(Input,atoms,**kw)
+
+	if kw['return_SS']:
+		return CS, SS
+	return CS
+
+
+def run_batch(seqs,atoms,**kwargs):
+
+	default_kwargs={ 
+	'job_name' : "prosecco_job",
+	'model_name' : "SLP_base",
+	'use_scaler' : True,
+	'scaler_fnpref' : "PROSECCO_scaler",
+	'return_SS': False,
+	'singleAtom_Nets' : True,
+	'print_progress' : True,
+	'Net' : None
+	}
+	kw = eval_kwargs(kwargs,default_kwargs)
+
+	Inputs = []
+	seqlens = []
+	SS = []
+	for seq in seqs:
+		this_Input = input_fromseq(seq,**kw)
+		if kw['return_SS']:
+			this_Input, this_SS = this_Input
+			SS.append(this_SS)
+		Inputs.append(this_Input)
+		seqlens.append(len(seq))
+	Input = np.concatenate(Inputs,axis=0)
+
+	CSs = _predict_CS(Input,atoms,**kw)
+
+	CS = []
+	ct = 0
+	for i,s in enumerate(seqlens):
+		CS.append(CSs[ct:ct+s])
+		ct += s
+
+	if kw['return_SS']:
+		return CS, SS
+	return CS
+
+
+def _predict_CS(Input,atoms,**kw):
+
+	default_kwargs={ 
+	'singleAtom_Nets' : True,
+	'print_progress' : True
+	}
+	kw = eval_kwargs(kwargs,default_kwargs)
+
 	if not kw['singleAtom_Nets']:
 		CS = _predict_singleNet(Input,atoms,**kw)
 	else:
@@ -61,9 +116,6 @@ def run(seq,atoms,**kwargs):
 			atCS = _predict_singleNet(Input,[atom],**kw)
 			CS.append(atCS)
 		CS = np.concatenate(CS,axis=-1)
-
-	if kw['return_SS']:
-		return CS, SS
 	return CS
 
 
@@ -101,8 +153,6 @@ def save(seq,CS,SS,ofn,fmt='backbone',at_order=None):
 					at_order[j],
 					cs))
 
-
-		pass
 	o.close()
 	return
 
