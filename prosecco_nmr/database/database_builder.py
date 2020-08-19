@@ -834,8 +834,8 @@ def remove_outliers(CS_db,contamination=0.01):
 			CS_db.loc[res_IDX,at] = at_cs
 	return CS_db
 
-def cluster_cystines(CS_db,atoms=["CA","CB"]):
-	return _cluster_byCS(CS_db,"C",atoms,"Cystine")
+def cluster_cystines(CS_db,atoms=["CA","CB"],singleAt_thresholds=[[200.0,36.0],[0.0,100.0]]):
+	return _cluster_byCS(CS_db,"C",atoms,"Cystine",singleAt_thresholds=singleAt_thresholds)
 
 def cluster_transPRO(CS_db,atoms=["CB","CG","CD"]):
 	return _cluster_byCS(CS_db,"P",atoms,"Trans",n_clusters=3,true_idx=2)
@@ -843,18 +843,22 @@ def cluster_transPRO(CS_db,atoms=["CB","CG","CD"]):
 def cluster_protHIS(CS_db,atoms=["CA","CB","CD2"]):
 	return _cluster_byCS(CS_db,"H",atoms,"Protonated",n_clusters=2,true_idx=1)
 
-def _cluster_byCS(CS_db,residue,atoms,attribute,n_clusters=2,true_idx=1,linkage='ward'):
+def _cluster_byCS(CS_db,residue,atoms,attribute,n_clusters=2,true_idx=1,linkage='ward',singleAt_thresholds=None):
 	CS_db[attribute] = False
 	Res_Idx = CS_db["Residue"] == residue
 	Res_CS = CS_db[Res_Idx]
 	Res_CS_X_all = np.array([ Res_CS[at] for at in atoms ]).T
+	true_attr = np.zeros(Res_CS_X_all.shape[0],dtype=bool)
+	if singleAt_thresholds is not None:
+		singleat_Idx = np.any((Res_CS_X_all > singleAt_thresholds[0]) & (Res_CS_X_all < singleAt_thresholds[1]) , -1)
+		true_attr[singleat_Idx] = True
+		CS_db.loc[Res_Idx,attribute] = true_attr
 	NaN_IDX = np.isnan(Res_CS_X_all).any(axis=1)
 	Res_CS_X = Res_CS_X_all[~NaN_IDX,:]
 	Res_CS_X = scale(Res_CS_X)
 	agg = AgglomerativeClustering(n_clusters=n_clusters,linkage=linkage).fit(Res_CS_X)
 	labels = agg.labels_
 	unique_labels, counts = np.unique(labels,return_counts=True)
-	true_attr = np.zeros(Res_CS_X_all.shape[0],dtype=bool)
 	true_attr[~NaN_IDX] = (labels == true_idx)
 	CS_db.loc[Res_Idx,attribute] = true_attr
 	return CS_db
