@@ -23,6 +23,7 @@ __all__ = ['get_atname_list',
 	'get_PDB_files',
 	'get_all_PDB_files',
 	'build_entry_database',
+	'dump_sequences',
 	'remove_entries',
 	'cluster_sequences',
 	'build_CS_database',
@@ -438,6 +439,20 @@ def build_entry_database(entries,
 
 	EntryDB = pd.DataFrame(EntryDB)
 	return EntryDB
+
+def dump_sequences(EntryDB,seq_directory="./FASTA"):
+	seqs = EntryDB["Sequence"].values
+	IDs = EntryDB["BMRB_ID"].values
+
+	d = Path(seq_directory)
+	d.mkdir(parents=True, exist_ok=True)
+
+	for i,seq in enumerate(seqs):
+		seqid = IDs[i]
+		fn = d / "{}.fasta".format(seqid)
+		seqf = open(fn,'w')
+		_dump_seq(seqf,seq,seqid)
+		seqf.close()
 
 def _get_DSSP(PDB_structure,fn,chain):
 	model = PDB_structure[0]
