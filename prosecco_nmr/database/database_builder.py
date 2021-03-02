@@ -138,6 +138,26 @@ def _parse_nomenclature_table(fn="atom_nom.tbl"):
 		d[res][bmrb] = pdb
 	return d
 
+def _parse_rc_cs(fn="randomcoil_cs.dat"):
+	filepath = pkg_resources.resource_filename(__name__, fn)
+	d = {}
+	for l in open(filepath):
+		if l[0] == "#":
+			ats = l.split()[1:]
+			continue
+		if not l.strip():
+			continue
+		c = l.split()
+		res = c[0]
+		if res not in d:
+			d[res] = {}
+		for i,x in enumerate(c[1:]):
+			if x == "----":
+				continue
+			d[res][ats[i]] = float(x)
+	return d
+
+
 def _get_residue_atoms(fn="atom_nom.tbl"):
 	d = _parse_nomenclature_table(fn)
 	d2 = { k : [ k2 for k2, v2 in v.items() ] for k,v in d.items() }
@@ -597,6 +617,7 @@ def build_CS_database(EntryDB,
 		_check_local_dir(NMRSTAR_directory)
 
 	atom_nom = _parse_nomenclature_table()
+	rc_cs = _parse_rc_cs()
 
 	CS_db = []
 	N = len(EntryDB)
@@ -673,6 +694,9 @@ def build_CS_database(EntryDB,
 				cs_err = float(x[6])
 			except ValueError:
 				cs_err = np.nan
+			cs_sec = np.nan
+			if res_1let in rc_cs and at in rc_cs[res_1let]:
+				cs_sec = cs_val - rc_cs[res_1let][at]
 			if at in Entry_CS[pos]:
 				if abs(cs_val - Entry_CS[pos][at]) > tolerance:
 					# Discard entry if multiple CS for the same atom
@@ -680,6 +704,7 @@ def build_CS_database(EntryDB,
 					discard = True
 					break
 			Entry_CS[pos][at] = cs_val
+			Entry_CS[pos][at+"_Sec"] = cs_sec
 			Entry_CS[pos][at+"_Err"] = cs_err
 
 		if discard:
