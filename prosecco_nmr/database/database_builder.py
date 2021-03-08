@@ -854,9 +854,13 @@ def include_secondary_cs(CS_db,atoms=["CA","CB","C","H","HA","N"]):
 	for at in atoms:
 		CS_db["{}_Sec".format(at)] = np.nan
 		for res,res_rc in rc_cs.items():
+			is_cystine = False
+			if res == "C_Ox":
+				res = "C"
+				is_cystine = True
 			if at not in res_rc:
 				continue
-			ResIDX = CS_db["Residue"] == res
+			ResIDX = (CS_db["Residue"] == res) & (CS_db["Cystine"] == is_cystine)
 			mycs = CS_db[ResIDX][at]
 			sec_cs = mycs - res_rc[at]
 			CS_db.loc[ResIDX,"{}_Sec".format(at)] = sec_cs
