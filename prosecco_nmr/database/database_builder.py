@@ -35,6 +35,7 @@ __all__ = ['get_atname_list',
 	'cluster_cystines',
 	'cluster_transPRO',
 	'cluster_protHIS',
+	'include_secondary_cs',
 	'check_referencing',
 	'keep_entries',
 	'atom_names',
@@ -617,7 +618,6 @@ def build_CS_database(EntryDB,
 		_check_local_dir(NMRSTAR_directory)
 
 	atom_nom = _parse_nomenclature_table()
-	rc_cs = _parse_rc_cs()
 
 	CS_db = []
 	N = len(EntryDB)
@@ -694,9 +694,6 @@ def build_CS_database(EntryDB,
 				cs_err = float(x[6])
 			except ValueError:
 				cs_err = np.nan
-			cs_sec = np.nan
-			if res_1let in rc_cs and at in rc_cs[res_1let]:
-				cs_sec = cs_val - rc_cs[res_1let][at]
 			if at in Entry_CS[pos]:
 				if abs(cs_val - Entry_CS[pos][at]) > tolerance:
 					# Discard entry if multiple CS for the same atom
@@ -704,7 +701,6 @@ def build_CS_database(EntryDB,
 					discard = True
 					break
 			Entry_CS[pos][at] = cs_val
-			Entry_CS[pos][at+"_Sec"] = cs_sec
 			Entry_CS[pos][at+"_Err"] = cs_err
 
 		if discard:
@@ -851,6 +847,19 @@ def check_referencing(CS_db,EntryDB,removesigma=1.5,atoms=["CA","CB","C","H","HA
 		bad_ref = np.absolute(diff) > sigma*removesigma
 		if (np.any(bad_ref)):
 			CS_db.loc[Entry_IDX,np.array(atoms)[bad_ref]] = np.nan
+	return CS_db
+
+def include_secondary_cs(CS_db,atoms=["CA","CB","C","H","HA","N"]):
+	rc_cs = _parse_rc_cs()
+	for at in atoms:
+		CS_db["{}_Sec".format(at)] = np.nan
+		for res,res_rc in rc_cs.items():
+			if at not in res_rc:
+				continue
+			ResIDX = CS_db["Residue"] == res
+			mycs = CS_db[ResIDX][at]
+			sec_cs = mycs - res_rc[at]
+			CS_db[ResIDX]["{}_Sec".format(at)] = sec_cs
 	return CS_db
 
 def remove_outliers(CS_db,contamination=0.01):
