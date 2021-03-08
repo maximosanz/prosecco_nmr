@@ -859,7 +859,7 @@ def include_secondary_cs(CS_db,atoms=["CA","CB","C","H","HA","N"]):
 			ResIDX = CS_db["Residue"] == res
 			mycs = CS_db[ResIDX][at]
 			sec_cs = mycs - res_rc[at]
-			CS_db[ResIDX]["{}_Sec".format(at)] = sec_cs
+			CS_db.loc[ResIDX,"{}_Sec".format(at)] = sec_cs
 	return CS_db
 
 def remove_outliers(CS_db,contamination=0.01):
