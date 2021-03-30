@@ -2,17 +2,17 @@
 
 function show_usage(){
 	printf "Usage: $0 [options [parameters]]\n"
-	prinft "\n"
+	printf "\n"
 	printf "Options:\n"
-	printf "-h|--help, Print help\n"
-	printf "-t|--target, Target ID\n"
-	printf "-o|--outdir, Output directory (default = FEATURES/[target]/ )\n"
-	printf "-s|--seq, Sequence file (FASTA, default = FASTA/[target].fasta/ )\n"
-	printf "-db|--hhblits_db, HHBlits database location (default = databases/uniclust30_2018_08/uniclust30_2018_08 )\n"
-	printf "-ref|--reformat_exe, reformat.pl executable location (default = reformat.pl )\n"
-	printf "-hh|--hhblits_exe, hhblits executable location (default = hhblits )\n"
-	printf "-psi|--psiblast_exe, hhblits executable location (default = psiblast )\n"
-	printf "-oct|--octave_exe, hhblits executable location (default = octave )\n"
+	printf " -h   | --help,         Print help\n"
+	printf " -t   | --target,       Target ID\n"
+	printf " -o   | --outdir,       Output directory (default = [target]/ )\n"
+	printf " -s   | --seq,          Sequence file (FASTA, default = [target].fasta/ )\n"
+	printf " -db  | --hhblits_db,   HHBlits database location (default = databases/uniclust30_2018_08/uniclust30_2018_08 )\n"
+	printf " -ref | --reformat_exe, reformat.pl executable location (default = reformat.pl )\n"
+	printf " -hh  | --hhblits_exe,  HHBlits executable location (default = hhblits )\n"
+	printf " -psi | --psiblast_exe, PSIBLAST executable location (default = psiblast )\n"
+	printf " -oct | --octave_exe,   Octave executable location (default = octave )\n"
 
 return 0
 }
@@ -58,14 +58,14 @@ shift
 done
 
 if [[ "$TARGET" == "" ]]; then 
-	printf "Target ID must be specified via --target|-t"
+	printf "Target ID must be specified via --target|-t\n"
 	exit 1
 fi
 if [[ "$TARGET_DIR" == "" ]]; then 
-	TARGET_DIR="FEATURES/${TARGET}"
+	TARGET_DIR="${TARGET}"
 fi
 if [[ "$TARGET_SEQ" == "" ]]; then 
-	TARGET_SEQ="FASTA/${TARGET}.fasta"
+	TARGET_SEQ="${TARGET}.fasta"
 fi
 
 MYDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
