@@ -1,4 +1,5 @@
 import numpy as np
+import pkg_resources
 
 def generate_domains(target, seq, crop_sizes='64,128,256', crop_step=32):
     windows = [int(x) for x in crop_sizes.split(",")]
@@ -48,7 +49,7 @@ _FREQ = { k : float(v)/_tot for k, v in _CTS.items()}
 
 AA = 'ACDEFGHIKLMNPQRSTVWYX-'
 BACKGROUND_AA_FREQ = np.array([ _FREQ[ch] for ch in AA])
-BLOSUM62 = np.load("BLOSUM62.npy")
+BLOSUM62 = np.load(pkg_resources.resource_filename(__name__, "BLOSUM62.npy"))
 
 LAMBDA = 0.3176
 QMAT = BACKGROUND_AA_FREQ * np.expand_dims(BACKGROUND_AA_FREQ,-1) * np.exp(LAMBDA*BLOSUM62)

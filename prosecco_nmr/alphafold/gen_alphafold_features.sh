@@ -23,7 +23,7 @@ TARGET_DIR=""
 HHBLITS_DB="databases/uniclust30_2018_08/uniclust30_2018_08"
 HHBLITS_EXE="hhblits"
 REF_EXE="reformat.pl"
-PSIBLAST_EXE="psiblats"
+PSIBLAST_EXE="psiblast"
 OCTAVE_EXE="octave"
 
 while [ ! -z "$1" ]; do

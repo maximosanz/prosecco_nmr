@@ -5,7 +5,7 @@ from pathlib import Path
 import scipy.io as sio
 from scipy.spatial.distance import pdist, squareform
 
-from .alphafold_utils import generate_domains, BACKGROUND_AA_FREQ, QMAT
+from alphafold_utils import generate_domains, BACKGROUND_AA_FREQ, QMAT
 
 def make_crops(seq_file,crop_dir):
     if crop_dir is None:
