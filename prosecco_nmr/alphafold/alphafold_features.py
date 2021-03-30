@@ -14,6 +14,6 @@ def generate_alphafold_features(target_ID,**kwargs):
 		sh_args.extend(['--{}'.format(kw),'{}'.format(par)])
 
 	sh_file = pkg_resources.resource_filename(__name__, SH_SCRIPT)
-	cmd = [sh_file] + sh_args
+	cmd = ['sh',sh_file] + sh_args
 	subprocess.run(cmd)
 	return
