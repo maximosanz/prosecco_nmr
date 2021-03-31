@@ -1,13 +1,9 @@
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import tensorflow as tf
-import pkg_resources
-import subprocess
 import os
 
-__all__ = [ 'generate_alphafold_features',
-			'run_alphafold'
+__all__ = [	'make_crops'
 	]
 
 
@@ -95,7 +91,8 @@ DEFAULT_AA = "ARNDCQEGHILKMFPSTWYVXOZ"
 
 
 def _seq_to_onehot(seq,AA=DEFAULT_AA,CS_db=None):
-
+	AA_arr = np.array([c for c in AA])
+	seqlen = len(seq)
 	seq_arr = np.array([c for c in seq])
 	seq_onehot = np.zeros((seqlen,23))
 	seq_onehot[np.where(AA_arr == np.expand_dims(seq_arr,-1))] = 1
@@ -144,9 +141,9 @@ def _make_shiftogram(CS_sec,
 # NDim is the number of dimensions of the feature
 
 DEFAULT_FEATURE_D = {
-	'torsions'   : ("TORSIONS/{}/{}.torsions" , lambda fn: np.load(fn,allow_pickle=True)['probs'] , 1)
-	'distogram'  : ("DISTOGRAMS/{}/{}.pickle" , lambda fn: np.load(fn,allow_pickle=True)['probs'] , 2)
-	'asa'		: ("ASAS/{}/{}.ss2" , _parse_AF_ss2 , 1)
+	'torsions'   : ("TORSIONS/{}/{}.torsions" , lambda fn: np.load(fn,allow_pickle=True)['probs'] , 1),
+	'distogram'  : ("DISTOGRAMS/{}/{}.pickle" , lambda fn: np.load(fn,allow_pickle=True)['probs'] , 2),
+	'asa'		: ("ASAS/{}/{}.ss2" , _parse_AF_ss2 , 1),
 	'sec_struct' : ("SECSTRUCTS/{}/{}.ss2" , _parse_AF_ss2 , 1)
 }
 
@@ -161,8 +158,9 @@ def _format_str(s,substr):
 	return s.format(*[substr]*s.count("{}"))
 
 # Currently it requires the CS database - no sequence-only prediction
-def make_crops(	Entry_DB,
-				CS_db,
+# seqs is a dictionary { entry_ID : seq }
+def make_crops(	seqs,
+				CS_db=None,
 				N_crop=64,
 				Edge=10,
 				overlap=0.5,
@@ -172,11 +170,11 @@ def make_crops(	Entry_DB,
 				ATOMS=DEFAULT_ATOMS,
 				AA=DEFAULT_AA,
 				RD_SHARDS=0,
-				validation_split=0.1,
+				validation_split=0.0,
 				training_fn='training',
 				validation_fn='validation',
 				every=1,
-				verbose=True)
+				verbose=True):
 
 
 
@@ -185,9 +183,7 @@ def make_crops(	Entry_DB,
 
 	N_LargeCrop = N_crop + Edge*2
 
-	N_Entries = len(Entries)
-
-	AA_arr = np.array([c for c in AA])
+	N_Entries = len(seqs)
 
 	if not RD_SHARDS:
 		datafile_path = training_fn+'.tfrec'
@@ -196,62 +192,60 @@ def make_crops(	Entry_DB,
 		datafile_paths = [ training_fn+'{}.tfrec'.format(i) for i in range(RD_SHARDS) ]
 		writers = [ tf.io.TFRecordWriter(f) for f in datafile_paths]
 
-
-	val_datafile_path = validation_fn+'.tfrec'
-	val_writer = tf.io.TFRecordWriter(val_datafile_path)
+	if validation_split > 0.0:
+		val_datafile_path = validation_fn+'.tfrec'
+		val_writer = tf.io.TFRecordWriter(val_datafile_path)
 
 	Crop_CT = 0
 
-	for i,entry in Entries.iterrows():
+	for i, (eID, seq) in enumerate(seqs.items()):
 		
 		if i % every:
 			continue
 		
-		eID = entry["BMRB_ID"]
-
 		if verbose:
 			print("N_Crops= {} ; Entry {} : {} / {}  ({}%)	".format(Crop_CT,eID,i,N_Entries,int(i*100/N_Entries)),end='\r')
 
 		feats = {}
 		for feat, val in feat_d.items():
-			if not os.path.isfile(_format_str(val[0],eID)):
+			fn = _format_str(val[0],eID)
+			if not os.path.isfile(fn):
 				continue
 			# Parse the feature file according to the function in feat_d
-			feat_arr = val[1](val[0])
+			feat_arr = val[1](fn)
 			feats[feat] = feat_arr
 
-
-		seq = entry["Sequence"]
 		seqlen = len(seq)
+		seq_onehot = _seq_to_onehot(seq,CS_db=entry_CS)
 
-		entry_CS = CS_db[CS_db["BMRB_ID"] == eID]
-		seq_onehot = _seq_to_onehot(seq,CS_db=entry_CS):
+		if CS_db is not None:
+			entry_CS = CS_db[CS_db["BMRB_ID"] == eID]
+			CS_sec = np.array(entry_CS.loc[:,ATOMS_sec])
+			nan_sec_IDX = np.isnan(CS_sec)
 		
-		CS_sec = np.array(entry_CS.loc[:,ATOMS_sec])
-		nan_sec_IDX = np.isnan(CS_sec)
-		
-		# Discard entries with no secondary CS
-		if np.all(nan_sec_IDX):
-			continue
+			# Discard entries with no secondary CS
+			if np.all(nan_sec_IDX):
+				continue
 
-		Sec_Shiftogram = _make_shiftogram(CS_sec,
-						Sgram_NBin=DEFAULT_SGRAM_BINS,
-						Sgram_Spreads=DEFAULT_SPREADS,
-						ATOMS=DEFAULT_ATOMS)
+			Sec_Shiftogram = _make_shiftogram(CS_sec,
+							Sgram_NBin=DEFAULT_SGRAM_BINS,
+							Sgram_Spreads=DEFAULT_SPREADS,
+							ATOMS=DEFAULT_ATOMS)
 
-		CS_sec_MASK = np.ones(CS_sec.shape)
-		CS_sec_MASK[nan_sec_IDX] = 0.0
+			CS_sec_MASK = np.ones(CS_sec.shape)
+			CS_sec_MASK[nan_sec_IDX] = 0.0
 		
-		tiling = crop_tiling(seqlen,N_crop,Edge,overlap)
+		tiling = _crop_tiling(seqlen,N_crop,Edge,overlap)
 		N_crops = tiling.shape[0]
 
 		feat_crops = {}
 		for feat, val in feat_d.items():
 			NDim = val[2]
-			feat_crops[feat] = CROPPING_FUNCTIONS[NDim]
+			feat_crops[feat] = CROPPING_FUNCTIONS[NDim](feats[feat],tiling,N_LargeCrop)
 
-		CS_sec_MASK_crops = _get_1D_crops(CS_sec_MASK,tiling,N_LargeCrop)
-		Sec_Shiftogram_crops = _get_1D_crops(Sec_Shiftogram,tiling,N_LargeCrop)
+		if CS_db is not None:
+			CS_sec_MASK_crops = _get_1D_crops(CS_sec_MASK,tiling,N_LargeCrop)
+			Sec_Shiftogram_crops = _get_1D_crops(Sec_Shiftogram,tiling,N_LargeCrop)
 
 		SEQ_onehot_crops = _get_1D_crops(Sec_Shiftogram,tiling,N_LargeCrop)
 		SEQ_crops = [ seq[tile[0]:tile[1]] for tile in tiling ]
@@ -260,9 +254,10 @@ def make_crops(	Entry_DB,
 			for j_crop in range(N_crops):
 				D_POS = (i_crop,j_crop)
 				
-				# Skip crops with no secondary CS in the i dimension
-				if not np.any(CS_sec_MASK_crops[i_crop] == 1.0):
-					continue
+				if CS_db is not None:
+					# Skip crops with no secondary CS in the i dimension
+					if not np.any(CS_sec_MASK_crops[i_crop] == 1.0):
+						continue
 				feature = {}
 
 				for feat, val in feat_d.items():
@@ -284,8 +279,9 @@ def make_crops(	Entry_DB,
 					feature['{}_seq_onehot'.format(DIM_NAMES[D])] = _arr2tfrec(SEQ_onehot_crops[D_POS[D]])
 					feature['{}_sequence'.format(DIM_NAMES[D])] = _bytes_feature(SEQ_crops[D_POS[D]].encode('utf-8'))
 
-					feature['{}_cs_mask_sec'.format(DIM_NAMES[D])] = _arr2tfrec(CS_sec_MASK_crops[D_POS[D]])
-					feature['{}_shiftogram_sec'.format(DIM_NAMES[D])] = _arr2tfrec(Sec_Shiftogram_crops[D_POS[D]])
+					if CS_db is not None:
+						feature['{}_cs_mask_sec'.format(DIM_NAMES[D])] = _arr2tfrec(CS_sec_MASK_crops[D_POS[D]])
+						feature['{}_shiftogram_sec'.format(DIM_NAMES[D])] = _arr2tfrec(Sec_Shiftogram_crops[D_POS[D]])
 
 				# Include global information
 				feature['entry_ID'] = _int64_feature(eID)
@@ -310,8 +306,9 @@ def make_crops(	Entry_DB,
 					else:
 						rdint = np.random.randint(RD_SHARDS)
 						writers[rdint].write(serialized_example)
-				
-	val_writer.close()
+
+	if validation_split > 0.0:
+		val_writer.close()
 	if not RD_SHARDS:
 		writer.close()
 	else:
@@ -319,31 +316,4 @@ def make_crops(	Entry_DB,
 			writers[i].close()
 			
 	return
-
-def _run_sh(script_name,tID,**kwargs):
-	# Double-dash arguments to the shell script can be passed as keyword arguments
-	sh_args = []
-	for kw, par in kwargs.items():
-		sh_args.extend(['--{}'.format(kw),'{}'.format(par)])
-
-	sh_file = pkg_resources.resource_filename(__name__, script_name)
-	cmd = ['sh',sh_file,"-t",tID] + sh_args
-	subprocess.run(cmd)
-	return
-
-FEATURE_SH_SCRIPT = "gen_alphafold_features.sh"
-
-def generate_alphafold_features(target_ID,**kwargs):
-	_run_sh(FEATURE_SH_SCRIPT,target_ID,**kwargs)
-	return
-
-ALPHAFOLD_SH_SCRIPT = "run_alphafold1.sh"
-
-def run_alphafold(target_ID,**kwargs):
-	_run_sh(ALPHAFOLD_SH_SCRIPT,target_ID,**kwargs)
-	return
-
-
-
-
 
