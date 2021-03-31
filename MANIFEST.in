@@ -1,7 +1,5 @@
 include prosecco_nmr/database/*.tbl
 include prosecco_nmr/database/*.dat
 include prosecco_nmr/alphafold/BLOSUM62.npy
-include prosecco_nmr/alphafold/gen_alphafold_features.sh
-include prosecco_nmr/alphafold/run_alphafold1.sh
 recursive-include prosecco_nmr/model/weights/ *
 recursive-include prosecco_nmr/alphafold/plmDCA/ *

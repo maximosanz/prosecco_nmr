@@ -95,8 +95,7 @@ TFREC_FN=$(realpath $TFREC_FN)
 mkdir -p "${OUTPUT_DIR}"
 echo "Saving output to ${OUTPUT_DIR}/"
 
-cd ${OUTPUT_DIR}
-OUTPUT_DIR=$(pwd)
+OUTPUT_DIR=$(realpath $OUTPUT_DIR)
 
 cd ${ALPHAFOLD_DIR}
 cd ..
