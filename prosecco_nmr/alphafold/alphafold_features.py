@@ -216,8 +216,8 @@ def make_crops(	seqs,
 			feats[feat] = feat_arr
 
 		seqlen = len(seq)
-		seq_onehot = _seq_to_onehot(seq,CS_db=entry_CS)
-
+		
+		entry_CS = None
 		if CS_db is not None:
 			entry_CS = CS_db[CS_db["BMRB_ID"] == eID]
 			CS_sec = np.array(entry_CS.loc[:,ATOMS_sec])
@@ -235,6 +235,7 @@ def make_crops(	seqs,
 			CS_sec_MASK = np.ones(CS_sec.shape)
 			CS_sec_MASK[nan_sec_IDX] = 0.0
 		
+		seq_onehot = _seq_to_onehot(seq,CS_db=entry_CS)
 		tiling = _crop_tiling(seqlen,N_crop,Edge,overlap)
 		N_crops = tiling.shape[0]
 
