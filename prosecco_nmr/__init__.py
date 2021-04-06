@@ -1,2 +1,2 @@
-from . import database, model, benchmark
+from . import database, model, benchmark, alphafold
 from .run import *
