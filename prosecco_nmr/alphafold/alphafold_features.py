@@ -3,7 +3,8 @@ import pandas as pd
 import tensorflow as tf
 import os
 
-__all__ = [	'make_crops'
+__all__ = [	'make_crops',
+			'decode_batch'
 	]
 
 
@@ -86,6 +87,8 @@ DEFAULT_SPREADS = {"C" : 24.0,
 				   "H" : 6.0,
 				   "N" : 40.0}
 
+DEFAULT_NCROP = 64
+
 # Standard amino-acid + Cystine (X), Trans proline (O), Protonated histidine (Z)
 DEFAULT_AA = "ARNDCQEGHILKMFPSTWYVXOZ"
 
@@ -143,7 +146,7 @@ def _make_shiftogram(CS_sec,
 DEFAULT_FEATURE_D = {
 	'torsions'   : ("TORSIONS/{}/{}.torsions" , lambda fn: np.load(fn,allow_pickle=True)['probs'] , 1),
 	'distogram'  : ("DISTOGRAMS/{}/{}.pickle" , lambda fn: np.load(fn,allow_pickle=True)['probs'] , 2),
-	'asa'		: ("ASAS/{}/{}.ss2" , _parse_AF_ss2 , 1),
+	'asa'		 : ("ASAS/{}/{}.ss2" , _parse_AF_ss2 , 1),
 	'sec_struct' : ("SECSTRUCTS/{}/{}.ss2" , _parse_AF_ss2 , 1)
 }
 
@@ -157,12 +160,12 @@ DIM_NAMES = ['i','j']
 def _format_str(s,substr):
 	return s.format(*[substr]*s.count("{}"))
 
-# Currently it requires the CS database - no sequence-only prediction
+
 # seqs is a dictionary { entry_ID : seq }
 def make_crops(	seqs,
 				CS_db=None,
-				N_crop=64,
-				Edge=10,
+				N_crop=DEFAULT_NCROP,
+				Edge=0,
 				overlap=0.5,
 				Sgram_NBin=DEFAULT_SGRAM_BINS,
 				Sgram_Spreads=DEFAULT_SPREADS,
@@ -216,6 +219,8 @@ def make_crops(	seqs,
 			feats[feat] = feat_arr
 
 		seqlen = len(seq)
+
+		CS_sec_MASK = np.ones(CS_sec.shape)
 		
 		entry_CS = None
 		if CS_db is not None:
@@ -232,7 +237,6 @@ def make_crops(	seqs,
 							Sgram_Spreads=DEFAULT_SPREADS,
 							ATOMS=DEFAULT_ATOMS)
 
-			CS_sec_MASK = np.ones(CS_sec.shape)
 			CS_sec_MASK[nan_sec_IDX] = 0.0
 		
 		seq_onehot = _seq_to_onehot(seq,CS_db=entry_CS)
@@ -244,21 +248,20 @@ def make_crops(	seqs,
 			NDim = val[2]
 			feat_crops[feat] = CROPPING_FUNCTIONS[NDim](feats[feat],tiling,N_LargeCrop)
 
+		CS_sec_MASK_crops = _get_1D_crops(CS_sec_MASK,tiling,N_LargeCrop)
 		if CS_db is not None:
-			CS_sec_MASK_crops = _get_1D_crops(CS_sec_MASK,tiling,N_LargeCrop)
 			Sec_Shiftogram_crops = _get_1D_crops(Sec_Shiftogram,tiling,N_LargeCrop)
 
-		SEQ_onehot_crops = _get_1D_crops(Sec_Shiftogram,tiling,N_LargeCrop)
+		SEQ_onehot_crops = _get_1D_crops(seq_onehot,tiling,N_LargeCrop)
 		SEQ_crops = [ seq[tile[0]:tile[1]] for tile in tiling ]
 
 		for i_crop in range(N_crops):
 			for j_crop in range(N_crops):
 				D_POS = (i_crop,j_crop)
 				
-				if CS_db is not None:
-					# Skip crops with no secondary CS in the i dimension
-					if not np.any(CS_sec_MASK_crops[i_crop] == 1.0):
-						continue
+				# Skip crops with no secondary CS in the i dimension
+				if not np.any(CS_sec_MASK_crops[i_crop] == 1.0):
+					continue
 				feature = {}
 
 				for feat, val in feat_d.items():
@@ -276,12 +279,11 @@ def make_crops(	seqs,
 				# Include res0, sequence and CS information for i, j
 				for D in range(2):
 					feature['{}_res0'.format(DIM_NAMES[D])] : _int64_feature(tiling[D_POS[D]][0])
-
 					feature['{}_seq_onehot'.format(DIM_NAMES[D])] = _arr2tfrec(SEQ_onehot_crops[D_POS[D]])
 					feature['{}_sequence'.format(DIM_NAMES[D])] = _bytes_feature(SEQ_crops[D_POS[D]].encode('utf-8'))
+					feature['{}_cs_mask_sec'.format(DIM_NAMES[D])] = _arr2tfrec(CS_sec_MASK_crops[D_POS[D]])
 
 					if CS_db is not None:
-						feature['{}_cs_mask_sec'.format(DIM_NAMES[D])] = _arr2tfrec(CS_sec_MASK_crops[D_POS[D]])
 						feature['{}_shiftogram_sec'.format(DIM_NAMES[D])] = _arr2tfrec(Sec_Shiftogram_crops[D_POS[D]])
 
 				# Include global information
@@ -318,3 +320,94 @@ def make_crops(	seqs,
 			
 	return
 
+
+
+i_FEATURES = ['i_seq_onehot','i_torsions','i_sec_struct','i_asa']
+j_FEATURES = ['j_seq_onehot','j_torsions','j_sec_struct','j_asa']
+ij_FEATURES = ['i_distogram','j_distogram','ij_distogram']
+out_FEATURES = ['i_shiftogram_sec']
+mask_FEATURES = ['i_cs_mask_sec']
+
+def _tf_parse_batch(egs,feats):
+	example = tf.io.parse_example(
+		egs, { f : tf.io.FixedLenFeature(shape=(), dtype=tf.string) for f in feats }
+	)
+	return example
+
+def _prepare_input_batch(examples,
+						i_feats=i_FEATURES,
+						j_feats=j_FEATURES,
+						ij_feats=ij_FEATURES,
+						N_Crop=DEFAULT_NCROP,
+						Edge=0,
+						iEdge_Rd=0,
+						jEdge_Rd=0):
+	
+	iEdge_Rd += Edge
+	jEdge_Rd += Edge
+	
+	arr = []
+	for f in i_feats:
+		arr.append(tf.map_fn(lambda x: tf.io.parse_tensor(x,tf.float32), examples[f],dtype=tf.float32)[:,iEdge_Rd:iEdge_Rd+N_Crop])
+	arr = tf.concat(arr,axis=-1)
+	arr_i = tf.expand_dims(arr,-2)
+	arr_i = tf.tile(arr_i,[1,1,N_Crop,1])
+	
+	arr = []
+	for f in j_feats:
+		arr.append(tf.map_fn(lambda x: tf.io.parse_tensor(x,tf.float32), examples[f],dtype=tf.float32)[:,jEdge_Rd:jEdge_Rd+N_Crop])
+	arr = tf.concat(arr,axis=-1)
+	arr_j = tf.expand_dims(arr,-3)
+	arr_j = tf.tile(arr_j,[1,N_Crop,1,1])
+	
+	arr_ij = []
+	for f in ij_feats:
+		arr_ij.append(tf.map_fn(lambda x: tf.io.parse_tensor(x,tf.float32), examples[f],dtype=tf.float32)[:,iEdge_Rd:iEdge_Rd+N_Crop,jEdge_Rd:jEdge_Rd+N_Crop])
+	arr_ij = tf.concat(arr_ij,axis=-1)
+	
+	input_arr = tf.concat([arr_i,arr_j,arr_ij],axis=-1)
+	
+	return input_arr
+
+def _prepare_output_batch(examples,out_feats=out_FEATURES,N_Crop=DEFAULT_NCROP,Edge=0,Edge_Rd=0):
+	Edge_Rd += Edge
+	arr = []
+	for f in out_feats:
+		arr.append(tf.map_fn(lambda x: tf.io.parse_tensor(x,tf.float32), examples[f],dtype=tf.float32)[:,Edge_Rd:Edge_Rd+N_Crop])
+	arr = tf.concat(arr,axis=-1)
+
+	return arr
+
+def _prepare_mask_batch(examples,mask_feats=mask_FEATURES,N_Crop=DEFAULT_NCROP,Edge=0,Edge_Rd=0,EPS=10.**-7):
+	Edge_Rd += Edge
+	arr = []
+	for f in mask_feats:
+		arr.append(tf.map_fn(lambda x: tf.io.parse_tensor(x,tf.float32), examples[f],dtype=tf.float32)[:,Edge_Rd:Edge_Rd+N_Crop])
+	arr = tf.concat(arr,axis=-1)
+	arr = tf.expand_dims(arr,-1)
+	
+	# Epsilon to avoid NaN loss
+	arr += EPS
+	
+	return arr
+
+def decode_batch(egs,
+				 i_feats=i_FEATURES,
+				 j_feats=j_FEATURES,
+				 ij_feats=ij_FEATURES,
+				 out_feats=out_FEATURES,
+				 mask_feats=mask_FEATURES,
+				 N_Crop=DEFAULT_NCROP,
+				 Edge=0,
+				 Edge_Rd=None):
+	feats = i_feats + j_feats + ij_feats + out_feats + mask_feats
+	if Edge_Rd is None:
+		iEdge_Rd = tf.random.uniform((1,), minval=-Edge, maxval=Edge+1, dtype=tf.dtypes.int32)[0]
+		jEdge_Rd = tf.random.uniform((1,), minval=-Edge, maxval=Edge+1, dtype=tf.dtypes.int32)[0]
+	examples = _tf_parse_batch(egs,feats)
+	in_arr = _prepare_input_batch(examples,i_feats=i_feats,j_feats=j_feats,ij_feats=ij_feats,N_Crop=N_Crop,iEdge_Rd=iEdge_Rd,jEdge_Rd=jEdge_Rd)
+	mask_arr = _prepare_mask_batch(examples,mask_feats=mask_feats,N_Crop=N_Crop,Edge_Rd=iEdge_Rd)
+	if out_feats:
+		out_arr = _prepare_output_batch(examples,out_feats=out_feats,N_Crop=N_Crop,Edge_Rd=iEdge_Rd)
+		return (in_arr, mask_arr), out_arr
+	return (in_arr, mask_arr)

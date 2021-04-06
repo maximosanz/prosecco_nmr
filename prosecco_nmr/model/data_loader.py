@@ -16,7 +16,8 @@ __all__ = ['input_fromseq',
 	'make_PROSECCO_nn',
 	'make_test_arr',
 	'Residue_Scaler',
-	'load_scaler'
+	'load_scaler',
+	'Prosecco_ResNet'
 	]
 
 _Special_Residue_Key = ["Cystine","Trans","Protonated"]
@@ -336,7 +337,7 @@ def make_NN_arrays(EntryDB,
 	for i,entry in EntryDB.iterrows():
 		eID = entry["BMRB_ID"]
 		perc = int(i*100/N)
-		print("\r  >> Making NN input: Entry {} ; Progress: {}/{} ({}%)     ".format(eID,i,N,perc), end='')
+		print("\r  >> Making NN input: Entry {} ; Progress: {}/{} ({}%)	 ".format(eID,i,N,perc), end='')
 		seq = entry["Sequence"]
 		eCS = CSdb[CSdb["BMRB_ID"]==eID]
 		seqLen = len(seq)
@@ -455,3 +456,120 @@ def make_test_arr(y,BMRB_map,seqIDX,BMRB_list,maxlen,average_multiple=True):
 		test_arr[eIDX,row_pos] = this_arr
 	test_arr /= test_ct
 	return test_arr
+
+
+def _res_block(X,
+			  channels=128,
+			  projection=64,
+			  dilation=1,
+			  conv_size=3,
+			  reg=None):
+	
+	# Make a copy of the projected input
+	X_initial = X
+	
+	X = tf.keras.layers.BatchNormalization()(X)
+	X = tf.keras.layers.Conv2D(projection,
+							   (1, 1),
+							   activation='elu',
+							   padding='same',
+							   kernel_regularizer=reg)(X)
+	
+	X = tf.keras.layers.BatchNormalization()(X)
+	X = tf.keras.layers.Conv2D(projection,
+							   (3, 3),
+							   activation='elu',
+							   dilation_rate=dilation,
+							   padding='same',
+							   kernel_regularizer=reg)(X)
+	
+	X = tf.keras.layers.BatchNormalization()(X)
+	X = tf.keras.layers.Conv2D(channels,
+							   (1, 1),
+							   activation='elu',
+							   padding='same',
+							   kernel_regularizer=reg)(X)
+	
+	X = tf.keras.layers.Add()([X, X_initial])
+	
+	return X
+
+
+def Prosecco_ResNet(N_Crop=64,
+                    Input_Channels=2848,
+                    dilation_cycles=[1,2,4,8],
+                    blocks_per_channel=[8,8,24],
+                    channel_nums=[512,256,128],
+                    N_Atoms=6,
+                    N_Bins=64,
+                    dropout=0.0,
+                    reg=None):
+    
+    assert(len(blocks_per_channel) == len(channel_nums))
+    
+    # N_Crop and N_Atoms must be even numbers (or 1) for the current architecture to work
+    assert(not N_Crop % 2 and (not N_Atoms % 2 or N_Atoms == 1) and N_Atoms < N_Crop)
+    
+    main_input = tf.keras.Input(shape=(N_Crop, N_Crop, Input_Channels),
+                       dtype='float32',
+                       name='input')
+    
+    output_mask = tf.keras.Input(shape=(N_Crop, N_Atoms, 1),
+                                 dtype='float32',
+                                 name='output_mask')
+
+    X = main_input
+    
+    if dropout > 0.0:
+        X = tf.keras.layers.SpatialDropout2D(dropout)(X)
+    
+    N_channel_blocks = len(blocks_per_channel)
+    
+    block_ct = 0
+    
+    for i_channel_block in range(N_channel_blocks):
+        channel_block_size = blocks_per_channel[i_channel_block]
+        n_channels = channel_nums[i_channel_block]
+        
+        X = tf.keras.layers.Conv2D(n_channels,(1, 1),padding='same')(X)
+        
+        for i_block in range(channel_block_size):
+            dilation = dilation_cycles[block_ct % len(dilation_cycles)]
+            X = res_block(X,
+                          channels=n_channels,
+                          dilation=dilation,
+                          reg=reg)
+            block_ct += 1
+            
+    # Apply a convolution (if necessary) along j_axis so that it becomes a multiple of N_Atoms
+    rem = N_Crop % N_Atoms
+    if rem:
+        conv_size = rem + 1
+        X = tf.keras.layers.Conv2D(n_channels,
+                                   (1, conv_size),
+                                   activation='elu',
+                                   padding='valid',
+                                   kernel_regularizer=reg)(X)
+        
+    # Project down to N_Bins
+    X = tf.keras.layers.Conv2D(N_Bins,
+                                (1, 1),
+                                activation='elu',
+                                padding='same',
+                                kernel_regularizer=reg)(X)
+
+    frac = int(( N_Crop - rem ) / N_Atoms)
+    
+    # Mean pooling to end up with N_Atoms in j
+    X = tf.keras.layers.AveragePooling2D(pool_size=(1, frac))(X)
+    
+    X = tf.keras.layers.Softmax()(X)
+    
+    # Multiply with output_mask to mask missing chemical shifts
+    X = tf.keras.layers.Multiply()([X, output_mask])
+            
+    model=tf.keras.Model([main_input, output_mask], X)
+    
+    return model
+
+
